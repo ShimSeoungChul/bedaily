@@ -6,7 +6,6 @@ const NAV_LINKS = [
   { href: '/posts', label: 'Posts' },
   { href: '/news', label: 'News' },
   { href: '/calendar', label: 'Calendar' },
-  { href: '/about', label: 'About' },
 ]
 
 export default function Header() {

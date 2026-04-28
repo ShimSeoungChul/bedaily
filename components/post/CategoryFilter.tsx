@@ -1,8 +1,13 @@
 'use client'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { CATEGORIES, cn, type Category } from '@/lib/utils'
+import { cn, type Category } from '@/lib/utils'
 
-export default function CategoryFilter({ active }: { active?: string }) {
+interface Props {
+  active?: string
+  categories?: string[]
+}
+
+export default function CategoryFilter({ active, categories = [] }: Props) {
   const router = useRouter()
   const params = useSearchParams()
 
@@ -20,10 +25,7 @@ export default function CategoryFilter({ active }: { active?: string }) {
     <div className="flex flex-wrap gap-2">
       <button
         onClick={() => select(null)}
-        className={cn(
-          'rounded-full border px-3 py-1 text-sm transition-colors',
-          !active ? 'font-medium' : ''
-        )}
+        className={cn('rounded-full border px-3 py-1 text-sm transition-colors', !active ? 'font-medium' : '')}
         style={{
           borderColor: 'var(--border)',
           backgroundColor: !active ? 'var(--text)' : 'transparent',
@@ -32,14 +34,11 @@ export default function CategoryFilter({ active }: { active?: string }) {
       >
         전체
       </button>
-      {CATEGORIES.map((cat) => (
+      {categories.map((cat) => (
         <button
           key={cat}
           onClick={() => select(cat)}
-          className={cn(
-            'rounded-full border px-3 py-1 text-sm transition-colors',
-            active === cat ? 'font-medium' : ''
-          )}
+          className={cn('rounded-full border px-3 py-1 text-sm transition-colors', active === cat ? 'font-medium' : '')}
           style={{
             borderColor: 'var(--border)',
             backgroundColor: active === cat ? 'var(--text)' : 'transparent',

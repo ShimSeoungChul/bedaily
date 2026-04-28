@@ -17,6 +17,7 @@ export default async function PostsPage({ searchParams }: PostsPageProps) {
   const { category } = await searchParams
   const allPosts = getAllPosts()
   const posts = category ? allPosts.filter((p) => p.frontmatter.category === category) : allPosts
+  const usedCategories = [...new Set(allPosts.map((p) => p.frontmatter.category))]
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
@@ -26,7 +27,7 @@ export default async function PostsPage({ searchParams }: PostsPageProps) {
           총 {allPosts.length}편
         </p>
         <Suspense>
-          <CategoryFilter active={category} />
+          <CategoryFilter active={category} categories={usedCategories} />
         </Suspense>
       </div>
 
