@@ -1,0 +1,22 @@
+---
+title: "Spring Boot 4.0 Preview: Project Leyden 통합과 GraalVM 네이티브 개선"
+date: "2026-04-24"
+category: "Backend"
+tags: ["Spring Boot", "Java", "GraalVM", "Leyden"]
+source: "https://spring.io/blog"
+comment: "Project Leyden의 AOT 캐시 기능이 스프링과 통합되면 네이티브 이미지 없이도 10배 빠른 기동 시간이 가능해질 수 있다. 주목할 변경사항."
+published: true
+---
+
+Spring Boot 4.0 첫 번째 프리뷰가 공개됐습니다. 이번 릴리즈에서 가장 주목할 만한 변경사항은 Project Leyden 통합과 GraalVM 네이티브 이미지 지원 강화입니다.
+
+## 주요 변경사항
+
+- **Project Leyden AOT 캐시**: JVM 기동 시 클래스 로딩·초기화 비용을 사전 계산해 캐싱
+- **Virtual Threads 기본 활성화**: Java 21+ 환경에서 Tomcat/Jetty 스레드풀 자동 전환
+- **Micrometer 2.x 업그레이드**: 메트릭 카디널리티 제한 기능 기본 포함
+- **Jakarta EE 11**: Servlet 6.1, JPA 3.2 지원
+
+## 마이그레이션 노트
+
+Spring Boot 3.x에서 4.0으로 업그레이드 시 `spring-boot-properties-migrator` 의존성을 먼저 추가해 deprecated 프로퍼티를 확인하세요.

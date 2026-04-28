@@ -1,0 +1,107 @@
+---
+title: "Spring AI로 RAG 파이프라인 구축하기"
+date: "2026-04-25"
+category: "AI"
+tags: ["Spring AI", "RAG", "LLM", "Java", "Vector DB"]
+summary: "Spring AI를 사용해 문서를 벡터화하고 LLM과 결합한 Retrieval-Augmented Generation 파이프라인을 Java로 구현하는 방법을 설명합니다."
+published: true
+---
+
+## RAG란?
+
+Retrieval-Augmented Generation(RAG)은 LLM의 고정된 학습 데이터 한계를 극복하기 위해, 질문과 관련된 문서를 실시간으로 검색해 프롬프트에 함께 넣어주는 패턴입니다. Spring AI는 이 과정을 Java 생태계에서 쉽게 구현할 수 있는 추상화를 제공합니다.
+
+## 의존성 추가
+
+```xml
+<dependency>
+  <groupId>org.springframework.ai</groupId>
+  <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
+</dependency>
+<dependency>
+  <groupId>org.springframework.ai</groupId>
+  <artifactId>spring-ai-pgvector-store-spring-boot-starter</artifactId>
+</dependency>
+```
+
+## 문서 적재 (Ingestion)
+
+```java
+@Component
+public class DocumentIngester {
+    private final VectorStore vectorStore;
+    private final TokenTextSplitter splitter = new TokenTextSplitter();
+
+    public void ingest(Resource resource) {
+        var reader = new TextReader(resource);
+        var docs = splitter.apply(reader.read());
+        vectorStore.add(docs);
+    }
+}
+```
+
+`TokenTextSplitter`는 청크 단위로 문서를 분할하고, `VectorStore.add()`가 임베딩 생성 후 pgvector에 저장합니다.
+
+## 질의 응답 (Query)
+
+```java
+@Service
+public class RagService {
+    private final ChatClient chatClient;
+    private final VectorStore vectorStore;
+
+    public String ask(String question) {
+        var context = vectorStore.similaritySearch(
+            SearchRequest.query(question).withTopK(4)
+        );
+
+        return chatClient.prompt()
+            .advisors(new QuestionAnswerAdvisor(vectorStore))
+            .user(question)
+            .call()
+            .content();
+    }
+}
+```
+
+`QuestionAnswerAdvisor`를 사용하면 유사 문서 검색과 프롬프트 보강을 자동으로 처리합니다.
+
+## application.yml 설정
+
+```yaml
+spring:
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      chat:
+        options:
+          model: gpt-4o-mini
+      embedding:
+        options:
+          model: text-embedding-3-small
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ragdb
+```
+
+## 주요 고려사항
+
+### 청크 크기 튜닝
+
+기본 청크 크기(800 토큰)가 항상 최선은 아닙니다. 문서 구조에 따라 `TokenTextSplitter`의 `defaultChunkSize`를 조정하세요.
+
+### 메타데이터 필터링
+
+특정 카테고리 문서만 검색하려면:
+
+```java
+var filter = FilterExpressionBuilder.eq("category", "devops");
+vectorStore.similaritySearch(
+    SearchRequest.query(question)
+        .withFilterExpression(filter)
+        .withTopK(4)
+);
+```
+
+## 정리
+
+Spring AI의 `VectorStore` + `QuestionAnswerAdvisor` 조합으로 RAG 파이프라인을 Java 코드 몇 줄로 구현할 수 있습니다. 다음 단계로는 ReRanker 추가와 Hybrid Search(키워드 + 벡터) 도입을 고려해보세요.

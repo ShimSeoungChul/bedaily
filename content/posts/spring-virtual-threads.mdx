@@ -1,0 +1,70 @@
+---
+title: "Spring Boot 3.x에서 Virtual Threads 활용하기"
+date: "2026-04-20"
+category: "Java"
+tags: ["Spring Boot", "Virtual Threads", "Java 21", "성능"]
+summary: "Java 21 Virtual Threads를 Spring Boot 3.2+에 적용하는 방법과 플랫폼 스레드 대비 성능 비교를 정리합니다."
+published: true
+---
+
+## 개요
+
+Java 21에서 정식 출시된 **Virtual Threads**는 기존 플랫폼 스레드(OS 스레드)와 달리 JVM이 직접 스케줄링하는 경량 스레드입니다. Spring Boot 3.2부터 공식 지원이 추가됐습니다.
+
+## 기존 방식의 한계
+
+Spring MVC의 기본 스레드 모델은 요청당 하나의 OS 스레드를 사용합니다.
+
+```java filename="TraditionalController.java"
+@RestController
+public class UserController {
+
+    @GetMapping("/users/{id}")
+    public User getUser(@PathVariable Long id) {
+        // I/O 블로킹 — 이 스레드는 응답까지 점유됨
+        return userService.findById(id);
+    }
+}
+```
+
+I/O가 많은 워크로드에서는 스레드가 블로킹 상태로 대기하며 리소스를 낭비합니다.
+
+## Virtual Threads 활성화
+
+Spring Boot 3.2+ 환경에서는 설정 한 줄로 활성화할 수 있습니다.
+
+```yaml filename="application.yml"
+spring:
+  threads:
+    virtual:
+      enabled: true
+```
+
+또는 Java Config로:
+
+```java filename="VirtualThreadConfig.java" {5-8}
+@Configuration
+public class VirtualThreadConfig {
+
+    @Bean
+    public TomcatProtocolHandlerCustomizer<?> virtualThreadCustomizer() {
+        return handler ->
+            handler.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+    }
+}
+```
+
+## 성능 비교
+
+| 설정 | 동시 요청 1,000 | p95 응답시간 |
+|------|----------------|-------------|
+| 플랫폼 스레드 (200개) | 큐잉 발생 | 850ms |
+| Virtual Threads | 정상 처리 | 120ms |
+
+## 주의사항
+
+Virtual Threads는 **CPU-bound 작업**이 아닌 **I/O-bound 작업**에 효과적입니다. `synchronized` 블록 내부에서 블로킹 I/O를 사용하면 캐리어 스레드를 핀닝(pinning)하여 오히려 성능이 저하될 수 있습니다.
+
+## 마무리
+
+기존 Spring MVC 코드를 변경하지 않고 설정만으로 처리량을 크게 개선할 수 있는 것이 Virtual Threads의 강점입니다. Spring Boot 3.2+ 프로젝트에서 I/O 집약적인 서비스라면 적극 도입을 권장합니다.

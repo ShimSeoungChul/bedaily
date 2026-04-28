@@ -1,0 +1,101 @@
+---
+title: "Kubernetes Rolling Update로 무중단 배포 구현하기"
+date: "2026-04-22"
+category: "DevOps"
+tags: ["Kubernetes", "Rolling Update", "무중단 배포", "DevOps"]
+summary: "Kubernetes의 Rolling Update 전략을 활용해 서비스 다운타임 없이 배포하는 방법과 readinessProbe, preStop 훅 설정을 정리합니다."
+published: true
+---
+
+## 왜 무중단 배포가 중요한가
+
+운영 중인 서비스를 배포할 때 가장 큰 걱정은 사용자가 503 에러를 만나는 순간입니다. Kubernetes의 Rolling Update를 올바르게 설정하면 파드(Pod)를 하나씩 교체하면서도 트래픽을 끊기지 않게 유지할 수 있습니다.
+
+## Deployment 기본 설정
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # 추가로 띄울 수 있는 파드 수
+      maxUnavailable: 0  # 항상 3개 유지
+  template:
+    spec:
+      containers:
+        - name: api
+          image: bedaily/api:v2
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
+```
+
+### maxSurge와 maxUnavailable
+
+| 설정 | 의미 |
+|------|------|
+| `maxSurge: 1` | 롤링 중 최대 4개 파드 허용 |
+| `maxUnavailable: 0` | 교체 중에도 최소 3개 항상 가용 |
+
+`maxUnavailable: 0`이 핵심입니다. 이 값이 1 이상이면 구형 파드를 먼저 죽이고 신규를 올리는 순서가 되어 잠깐 순단이 발생합니다.
+
+## readinessProbe 필수 설정
+
+신규 파드가 `Ready` 상태가 되기 전까지 kube-proxy는 서비스 엔드포인트에 추가하지 않습니다. Spring Boot라면 Actuator의 readiness 엔드포인트를 활용하세요.
+
+```java
+// Spring Boot 2.3+는 자동 활성화
+// application.yml
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+```
+
+## preStop 훅으로 graceful shutdown
+
+파드가 `Terminating` 상태가 되면 kube-proxy가 엔드포인트를 제거하기까지 수 초의 지연이 있습니다. `preStop` 훅에서 짧게 sleep을 주면 이 틈새를 메울 수 있습니다.
+
+```yaml
+lifecycle:
+  preStop:
+    exec:
+      command: ["/bin/sh", "-c", "sleep 5"]
+```
+
+JVM 서버라면 추가로 `terminationGracePeriodSeconds`를 애플리케이션 shutdown 시간보다 넉넉하게 설정해두세요.
+
+## 배포 확인
+
+```bash
+kubectl rollout status deployment/api-server
+# Waiting for deployment "api-server" rollout to finish...
+# deployment "api-server" successfully rolled out
+
+kubectl rollout history deployment/api-server
+```
+
+문제 발생 시 즉시 롤백:
+
+```bash
+kubectl rollout undo deployment/api-server
+```
+
+## 정리
+
+- `maxUnavailable: 0` + `maxSurge: 1` 조합이 무중단의 기본
+- readinessProbe 없이는 트래픽이 준비 안 된 파드로 흘러 500 에러 발생
+- preStop sleep 5초로 kube-proxy 전파 지연 대응
