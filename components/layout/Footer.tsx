@@ -14,7 +14,7 @@ export default function Footer() {
     >
       <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-4 sm:flex-row sm:px-6">
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          © {new Date().getFullYear()} bedaily.dev
+          © {new Date().getFullYear()} bedaily.me
         </p>
         <div className="flex items-center gap-4">
           {SOCIAL_LINKS.map((link) => (

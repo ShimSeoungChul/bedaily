@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
   title: 'About',
-  description: 'bedaily.dev 소개 — Backend, AI, Java 기술 블로그',
+  description: 'bedaily.me 소개 — Backend, AI, Java 기술 블로그',
 }
 
 const SOCIAL_LINKS = [
@@ -18,7 +18,7 @@ export default function AboutPage() {
 
       <div className="prose prose-neutral dark:prose-invert max-w-none">
         <p>
-          <strong>bedaily.dev</strong>는 Backend · AI · Java 분야의 기술 스택과 뉴스를 정리하는 개인 기술 블로그입니다.
+          <strong>bedaily.me</strong>는 Backend · AI · Java 분야의 기술 스택과 뉴스를 정리하는 개인 기술 블로그입니다.
         </p>
         <p>
           Threads와 Instagram에 짧게 공유하는 내용의 심화 버전을 이곳에 아카이빙합니다.

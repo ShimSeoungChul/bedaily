@@ -3,7 +3,7 @@ import { getAllPosts } from '@/lib/mdx/posts'
 import { getAllNews } from '@/lib/mdx/news'
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const base = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://bedaily.dev'
+  const base = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://bedaily.me'
   const posts = getAllPosts()
   const news = getAllNews()
 

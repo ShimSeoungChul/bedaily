@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 
-export default function NewsletterCTA() {
+export default function NewsletterCTA({ compact = false }: { compact?: boolean }) {
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'duplicate' | 'error'>('idle')
 
@@ -27,6 +27,48 @@ export default function NewsletterCTA() {
     }
   }
 
+  if (compact) {
+    return (
+      <div>
+        {status === 'success' ? (
+          <p className="text-sm font-medium" style={{ color: '#16a34a' }}>
+            ✓ 구독해 주셔서 감사합니다!
+          </p>
+        ) : (
+          <form onSubmit={handleSubmit} className="flex gap-2">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="이메일을 입력하세요"
+              required
+              className="flex-1 rounded-lg border px-4 py-2.5 text-sm outline-none focus:ring-2"
+              style={{
+                borderColor: 'var(--border)',
+                backgroundColor: 'var(--bg-subtle)',
+                color: 'var(--text)',
+              }}
+            />
+            <button
+              type="submit"
+              disabled={status === 'loading'}
+              className="rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
+              style={{ backgroundColor: 'var(--accent)' }}
+            >
+              {status === 'loading' ? '...' : '구독'}
+            </button>
+          </form>
+        )}
+        {status === 'duplicate' && (
+          <p className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>이미 구독 중인 이메일입니다.</p>
+        )}
+        {status === 'error' && (
+          <p className="mt-2 text-xs" style={{ color: '#dc2626' }}>오류가 발생했습니다. 다시 시도해 주세요.</p>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div
       className="rounded-xl border p-6 sm:p-8"
@@ -41,7 +83,7 @@ export default function NewsletterCTA() {
 
       {status === 'success' ? (
         <p className="text-sm font-medium" style={{ color: '#16a34a' }}>
-          구독해 주셔서 감사합니다!
+          ✓ 구독해 주셔서 감사합니다!
         </p>
       ) : (
         <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:flex-row">

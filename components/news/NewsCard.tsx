@@ -11,8 +11,8 @@ export default function NewsCard({ news }: { news: NewsItem }) {
 
   return (
     <article
-      className="rounded-xl border p-5"
-      style={{ borderColor: 'var(--border)' }}
+      className="card-hover group rounded-xl border p-5 transition-all duration-200"
+      style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
     >
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <CategoryBadge category={news.frontmatter.category} />
@@ -33,8 +33,8 @@ export default function NewsCard({ news }: { news: NewsItem }) {
           href={news.frontmatter.source}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-xs hover:underline"
-          style={{ color: 'var(--text-subtle)' }}
+          className="text-xs transition-colors hover:underline"
+          style={{ color: 'var(--accent)' }}
         >
           {hostname} ↗
         </a>

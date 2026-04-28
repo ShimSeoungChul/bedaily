@@ -41,6 +41,53 @@ body {
   color: var(--text);
 }
 
+/* ── Hero ──────────────────────────────────── */
+.hero-section {
+  background: var(--bg);
+}
+
+.hero-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 80% 60% at 50% -10%, rgba(37,99,235,0.18) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .hero-glow {
+    background: radial-gradient(ellipse 80% 60% at 50% -10%, rgba(96,165,250,0.15) 0%, transparent 70%);
+  }
+}
+
+.hero-title {
+  background: linear-gradient(135deg, var(--text) 0%, var(--text-muted) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+@media (prefers-color-scheme: dark) {
+  .hero-title {
+    background: linear-gradient(135deg, #f8fafc 0%, #94a3b8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}
+
+/* ── Card hover ─────────────────────────────── */
+.card-hover:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  .card-hover:hover {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+}
+
 /* Shiki dual-theme support */
 .shiki span {
   color: var(--shiki-light);
