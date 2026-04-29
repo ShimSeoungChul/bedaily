@@ -92,7 +92,7 @@ export default function Timeline({ events }: Props) {
                     <EventCard
                       key={event.slug}
                       event={event}
-                      isPast={false}
+                      isPast={event.frontmatter.date < today}
                     />
                   ))}
                 </div>
