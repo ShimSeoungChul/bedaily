@@ -5,7 +5,13 @@
       "Bash(cp -r /Users/com/IdeaProjects/bedaily-app/. /Users/com/IdeaProjects/bedaily/)",
       "Bash(rm -rf /Users/com/IdeaProjects/bedaily-app)",
       "Bash(npm install *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(node scripts/fetch-events.mjs)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(rm /Users/com/IdeaProjects/bedaily/content/events/*.mdx)",
+      "Bash(git commit *)"
     ]
   }
 }
