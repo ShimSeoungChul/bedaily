@@ -6,10 +6,9 @@ import EventCard from './EventCard'
 
 interface Props {
   pastGroups: { yearMonth: string; label: string; events: CalendarEvent[] }[]
-  today: string
 }
 
-export default function PastSection({ pastGroups, today }: Props) {
+export default function PastSection({ pastGroups }: Props) {
   const [open, setOpen] = useState(false)
 
   const total = pastGroups.reduce((n, g) => n + g.events.length, 0)
@@ -46,7 +45,7 @@ export default function PastSection({ pastGroups, today }: Props) {
                   <EventCard
                     key={event.slug}
                     event={event}
-                    isPast={event.frontmatter.date < today}
+                    isPast={true}
                   />
                 ))}
               </div>

@@ -57,7 +57,7 @@ export default function Timeline({ events }: Props) {
   return (
     <div>
       {/* 지난 이벤트 — 기본 접힘 */}
-      <PastSection pastGroups={pastGroups} today={today} />
+      <PastSection pastGroups={pastGroups} />
 
       {/* 현재 월 + 미래 */}
       {upcomingEntries.length === 0 ? (
@@ -92,7 +92,7 @@ export default function Timeline({ events }: Props) {
                     <EventCard
                       key={event.slug}
                       event={event}
-                      isPast={event.frontmatter.date < today}
+                      isPast={false}
                     />
                   ))}
                 </div>
