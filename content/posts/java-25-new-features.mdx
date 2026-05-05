@@ -15,6 +15,23 @@ Java 25는 Java 21 이후 첫 **LTS(Long-Term Support)** 릴리스입니다. 프
 
 Java 21에서 Virtual Threads를 도입했을 때, `synchronized` 블록 내부에서 블로킹 I/O를 호출하면 캐리어 스레드 전체가 함께 블로킹되는 **핀닝(pinning)** 문제가 있었습니다. Java 25(JEP 491)에서 이 제약이 완전히 해제됐습니다.
 
+Virtual Threads가 I/O로 블로킹될 때 정상적으로는 Carrier Thread에서 **unmount**되어 다른 Virtual Thread가 그 자리를 채웁니다. 핀닝이 발생하면 이 unmount가 일어나지 않습니다.
+
+```text
+[정상]  VT-A ──→ I/O 대기 ──→ unmount
+        Carrier Thread ──────────→ VT-B 실행 (재사용)
+
+[핀닝]  VT-A ──→ synchronized → I/O 대기 (unmount 불가)
+        Carrier Thread ────────────────────→ 함께 블로킹
+```
+
+Carrier Thread는 CPU 코어 수만큼만 존재합니다. 핀닝이 쌓이면:
+
+| 핀닝 수 | Carrier Thread (예: 8개) | 결과 |
+|--------|--------------------------|------|
+| 0개 | 자유롭게 순환 | 정상 처리 |
+| 8개 | 전부 블로킹 | 나머지 VT 모두 대기 → 사실상 hang |
+
 ```java filename="PinningBefore.java"
 // Java 21: synchronized 내부 블로킹 → 캐리어 스레드 핀닝 발생
 public class UserRepository {
