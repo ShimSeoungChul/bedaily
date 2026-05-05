@@ -1,0 +1,219 @@
+---
+title: "Java 25 핵심 기능 실전 정리 — LTS 업그레이드 전에 알아야 할 것들"
+date: "2026-05-05"
+category: "Java"
+tags: ["Java 25", "LTS", "Structured Concurrency", "Scoped Values", "Virtual Threads", "Pattern Matching"]
+summary: "Java 25 LTS에서 정식 출시된 Structured Concurrency, Scoped Values, Primitive Patterns 등 백엔드 개발자에게 실질적으로 중요한 기능을 코드 예제와 함께 정리합니다."
+published: true
+---
+
+## 개요
+
+Java 25는 Java 21 이후 첫 **LTS(Long-Term Support)** 릴리스입니다. 프리뷰를 졸업한 Structured Concurrency와 Scoped Values가 프로덕션 사용 가능한 API로 확정됐고, Java 21 도입 당시 가장 큰 걸림돌이었던 Virtual Threads의 `synchronized` 핀닝 문제도 해결됐습니다. 이 글은 백엔드 서비스 코드에 직접 영향을 주는 기능에 집중합니다.
+
+## Virtual Threads 핀닝 문제 해결 (JEP 491)
+
+Java 21에서 Virtual Threads를 도입했을 때, `synchronized` 블록 내부에서 블로킹 I/O를 호출하면 캐리어 스레드 전체가 함께 블로킹되는 **핀닝(pinning)** 문제가 있었습니다. Java 25(JEP 491)에서 이 제약이 완전히 해제됐습니다.
+
+```java filename="PinningBefore.java"
+// Java 21: synchronized 내부 블로킹 → 캐리어 스레드 핀닝 발생
+public class UserRepository {
+
+    public synchronized User findById(Long id) {
+        // JDBC 블로킹 호출 동안 캐리어 스레드 점유 → 처리량 저하
+        return jdbcTemplate.queryForObject(SQL, User.class, id);
+    }
+}
+```
+
+```java filename="PinningAfter.java"
+// Java 25: 동일 코드에서 블로킹 시 캐리어 스레드 해제 → Virtual Threads 본래 동작
+public class UserRepository {
+
+    public synchronized User findById(Long id) {
+        // 캐리어 스레드가 블로킹 중 다른 Virtual Thread를 실행할 수 있음
+        return jdbcTemplate.queryForObject(SQL, User.class, id);
+    }
+}
+```
+
+Java 21에서 `ReentrantLock`으로 우회했던 코드는 Java 25에서 `synchronized`를 그대로 유지해도 됩니다.
+
+## Structured Concurrency — 병렬 작업을 하나의 단위로 관리하기
+
+### 기존 방식의 문제
+
+여러 다운스트림 서비스를 병렬로 호출하는 팬아웃 패턴은 `ExecutorService`와 `Future`로 구현해왔습니다. 문제는 한 태스크에서 예외가 발생해도 나머지 태스크가 계속 실행된다는 점입니다.
+
+```java filename="LegacyFanOut.java"
+public OrderSummary getOrderSummary(Long orderId) throws Exception {
+    ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
+    Future<Order> orderFuture = executor.submit(() -> orderService.findById(orderId));
+    Future<Payment> paymentFuture = executor.submit(() -> paymentService.findByOrderId(orderId));
+
+    try {
+        Order order = orderFuture.get();       // 예외 발생 시
+        Payment payment = paymentFuture.get(); // paymentFuture는 여전히 실행 중
+        return new OrderSummary(order, payment);
+    } finally {
+        executor.shutdown(); // 수동 정리 필요
+    }
+}
+```
+
+### StructuredTaskScope 적용
+
+`StructuredTaskScope`는 자식 태스크가 스코프보다 오래 살아남을 수 없음을 보장합니다. `ShutdownOnFailure`를 사용하면 어느 하나라도 실패 시 나머지가 자동으로 취소됩니다.
+
+```java filename="StructuredFanOut.java" {5-12}
+public OrderSummary getOrderSummary(Long orderId) throws Exception {
+    try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+
+        StructuredTaskScope.Subtask<Order> orderTask =
+            scope.fork(() -> orderService.findById(orderId));
+        StructuredTaskScope.Subtask<Payment> paymentTask =
+            scope.fork(() -> paymentService.findByOrderId(orderId));
+
+        scope.join();           // 두 태스크 모두 완료 대기
+        scope.throwIfFailed();  // 실패 시 예외 전파, 나머지 태스크 자동 취소
+
+        return new OrderSummary(orderTask.get(), paymentTask.get());
+    } // AutoCloseable: 스코프 종료 시 모든 자식 태스크 정리
+}
+```
+
+### ShutdownOnSuccess — 최초 응답 반환
+
+Primary/Fallback 레이싱 패턴에는 `ShutdownOnSuccess`를 사용합니다. 먼저 응답한 태스크의 결과를 반환하고 나머지는 취소됩니다.
+
+```java filename="RacingScope.java"
+public String getProductInfo(String productId) throws Exception {
+    try (var scope = new StructuredTaskScope.ShutdownOnSuccess<String>()) {
+        scope.fork(() -> primaryCatalogService.fetch(productId));
+        scope.fork(() -> fallbackCatalogService.fetch(productId));
+
+        scope.join();
+        return scope.result(); // 최초 성공 결과 반환
+    }
+}
+```
+
+## Scoped Values — ThreadLocal의 진화
+
+`ThreadLocal`은 요청 컨텍스트(userId, traceId 등)를 메서드 파라미터 없이 전달하는 표준 수단이었습니다. 그러나 Virtual Threads 환경에서는 자식 스레드에 값이 상속될 때마다 복사가 발생해 오버헤드가 커집니다. **Scoped Values**는 불변이고 스코프 내에서만 유효해 이 문제를 해결합니다.
+
+```java filename="ThreadLocalContext.java"
+// 기존 ThreadLocal 방식: mutable, 수동 remove() 필요
+public class RequestContext {
+    private static final ThreadLocal<String> USER_ID = new ThreadLocal<>();
+
+    public static void set(String userId) { USER_ID.set(userId); }
+    public static String get() { return USER_ID.get(); }
+    public static void clear() { USER_ID.remove(); } // 누락 시 메모리 누수
+}
+```
+
+```java filename="ScopedValueContext.java" {3-6}
+// Java 25 ScopedValue 방식: immutable, 스코프 종료 시 자동 해제
+public class RequestContext {
+    public static final ScopedValue<String> USER_ID = ScopedValue.newInstance();
+}
+
+// 사용 측: where().run()으로 바인딩 범위 명시
+ScopedValue.where(RequestContext.USER_ID, userId).run(() -> {
+    orderService.createOrder(orderRequest); // 하위 호출 어디서든 USER_ID 접근 가능
+});
+```
+
+스코프 밖에서 `USER_ID.get()`을 호출하면 `NoSuchElementException`이 발생해 컨텍스트 누수를 컴파일 타임이 아닌 런타임에 즉시 감지할 수 있습니다.
+
+## Primitive Types in Patterns — switch와 instanceof 확장
+
+패턴 매칭이 참조 타입을 넘어 **기본형(primitive type)**으로 확장됐습니다. HTTP 상태 코드 분기나 역직렬화 결과 타입 체크 같은 실무 코드에 바로 적용할 수 있습니다.
+
+```java filename="PrimitivePatterns.java"
+// switch에서 int 패턴 가드 사용
+public static String classifyStatus(int statusCode) {
+    return switch (statusCode) {
+        case int n when n >= 500 -> "서버 오류";
+        case int n when n >= 400 -> "클라이언트 오류";
+        case int n when n >= 300 -> "리다이렉션";
+        case int n when n >= 200 -> "성공";
+        default                  -> "정보";
+    };
+}
+
+// instanceof로 역직렬화 Number 타입 체크
+public static long toLong(Number value) {
+    if (value instanceof int n) return n;
+    if (value instanceof long n) return n;
+    if (value instanceof double n) return (long) n;
+    throw new IllegalArgumentException("지원하지 않는 타입: " + value.getClass());
+}
+```
+
+## 그 외 주목할 변경사항
+
+### Flexible Constructor Bodies
+
+`super()` 호출 이전에 로컬 변수 선언과 유효성 검사를 작성할 수 있습니다. 기존에는 스태틱 팩토리 메서드로 우회해야 했습니다.
+
+```java filename="FlexibleConstructor.java"
+public class PositiveAmount {
+    private final int value;
+
+    public PositiveAmount(int value) {
+        // Java 25: super() 이전 검증 가능
+        if (value <= 0) throw new IllegalArgumentException("양수여야 합니다: " + value);
+        super();
+        this.value = value;
+    }
+}
+```
+
+### Module Import Declarations
+
+`import module java.sql;` 한 줄로 모듈 내 공개 패키지를 모두 임포트합니다.
+
+```java
+// 기존
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+
+// Java 25
+import module java.sql;
+```
+
+### Stream Gatherers (Java 24에서 확정)
+
+`Stream.gather(Gatherer)`로 커스텀 중간 연산을 작성할 수 있습니다. 배치 처리에 `Gatherers.windowFixed()`를 활용하면 간결합니다.
+
+```java filename="BatchGatherer.java"
+// 1,000건 스트림을 100건씩 배치로 나눠 저장
+productStream
+    .gather(Gatherers.windowFixed(100))
+    .forEach(batch -> productRepository.saveAll(batch));
+```
+
+### Simple Source Files (Unnamed Classes)
+
+`class` 선언 없이 `void main()` 메서드만으로 Java 파일을 실행할 수 있습니다. 빠른 프로토타이핑이나 스크립트성 작업에 유용합니다.
+
+```java filename="Hello.java"
+void main() {
+    System.out.println("Hello, Java 25!");
+}
+```
+
+## Java 21 → 25 마이그레이션 체크리스트
+
+- **`synchronized` 내 블로킹 I/O**: 핀닝 해결로 Java 21에서 `ReentrantLock`으로 우회한 코드를 원복할 수 있음
+- **`ThreadLocal` 요청 컨텍스트**: Virtual Threads 사용 시 Scoped Values 전환 검토
+- **`ExecutorService` 팬아웃 패턴**: Structured Concurrency로 교체하면 취소·오류 전파가 명확해짐
+- **Java 21 LTS 지원 기간**: Oracle 기준 2031년까지 지원되므로 업그레이드 타이밍은 팀 상황에 맞게 결정
+
+## 마무리
+
+Structured Concurrency와 Scoped Values의 정식 출시는 단순한 API 추가가 아닙니다. 두 기능이 합쳐지면 태스크 생명주기 관리와 컨텍스트 전파가 명시적이고 안전한 모델로 통합됩니다. Virtual Threads 핀닝 해결까지 더해져 Java 25는 고처리량 I/O 서비스를 작성하기에 가장 완성도 높은 Java LTS가 됐습니다.
