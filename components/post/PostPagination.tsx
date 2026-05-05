@@ -17,28 +17,30 @@ export default function PostPagination({ prev, next }: PostPaginationProps) {
       {prev ? (
         <Link
           href={`/posts/${prev.slug}`}
-          className="group flex flex-col gap-1 rounded-lg border p-4 transition-colors"
-          style={{ borderColor: 'var(--border)' }}
+          className="card-hover group flex flex-col gap-1 rounded-xl border p-4 transition-all duration-200"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
         >
           <span className="text-xs" style={{ color: 'var(--text-subtle)' }}>← 이전 글</span>
-          <span className="text-sm font-medium group-hover:underline" style={{ color: 'var(--text)' }}>
+          <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>
             {prev.frontmatter.title}
           </span>
         </Link>
       ) : (
         <div />
       )}
-      {next && (
+      {next ? (
         <Link
           href={`/posts/${next.slug}`}
-          className="group flex flex-col items-end gap-1 rounded-lg border p-4 transition-colors"
-          style={{ borderColor: 'var(--border)' }}
+          className="card-hover group flex flex-col items-end gap-1 rounded-xl border p-4 transition-all duration-200"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
         >
           <span className="text-xs" style={{ color: 'var(--text-subtle)' }}>다음 글 →</span>
-          <span className="text-sm font-medium group-hover:underline" style={{ color: 'var(--text)' }}>
+          <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>
             {next.frontmatter.title}
           </span>
         </Link>
+      ) : (
+        <div />
       )}
     </nav>
   )
