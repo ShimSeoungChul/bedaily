@@ -9,6 +9,19 @@ const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin']
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://bedaily.me'
 
+const websiteSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: 'bedaily.dev',
+  description: 'Backend · AI · Java 기술 스택과 뉴스를 다루는 기술 블로그',
+  url: SITE_URL,
+  potentialAction: {
+    '@type': 'SearchAction',
+    target: `${SITE_URL}/posts?category={search_term_string}`,
+    'query-input': 'required name=search_term_string',
+  },
+}
+
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
@@ -30,6 +43,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ko" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteSchema) }}
+        />
         <Header />
         <div className="flex flex-1 flex-col">{children}</div>
         <Footer />

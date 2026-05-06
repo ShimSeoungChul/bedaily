@@ -10,6 +10,8 @@ import PostHeader from '@/components/post/PostHeader'
 import PostPagination from '@/components/post/PostPagination'
 import NewsletterCTA from '@/components/common/NewsletterCTA'
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://bedaily.me'
+
 interface Props {
   params: Promise<{ slug: string }>
 }
@@ -47,21 +49,41 @@ export default async function PostDetailPage({ params }: Props) {
     Promise.resolve(getAdjacentPosts(slug)),
   ])
 
+  const articleSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: post.frontmatter.title,
+    description: post.frontmatter.summary,
+    datePublished: post.frontmatter.date,
+    dateModified: post.frontmatter.date,
+    keywords: post.frontmatter.tags,
+    url: `${SITE_URL}/posts/${slug}`,
+    image: `${SITE_URL}/posts/${slug}/opengraph-image`,
+    author: { '@type': 'Organization', name: 'bedaily.dev', url: SITE_URL },
+    publisher: { '@type': 'Organization', name: 'bedaily.dev', url: SITE_URL },
+  }
+
   return (
-    <PostLayout
-      sidebar={<LeftSidebar activeCategory={post.frontmatter.category} />}
-      toc={<TableOfContents items={toc} />}
-    >
-      <article>
-        <PostHeader post={post} />
-        <div className="prose prose-neutral dark:prose-invert max-w-none">
-          {content}
-        </div>
-        <div className="mt-12">
-          <NewsletterCTA />
-        </div>
-        <PostPagination prev={adjacent.prev} next={adjacent.next} />
-      </article>
-    </PostLayout>
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(articleSchema) }}
+      />
+      <PostLayout
+        sidebar={<LeftSidebar activeCategory={post.frontmatter.category} />}
+        toc={<TableOfContents items={toc} />}
+      >
+        <article>
+          <PostHeader post={post} />
+          <div className="prose prose-neutral dark:prose-invert max-w-none">
+            {content}
+          </div>
+          <div className="mt-12">
+            <NewsletterCTA />
+          </div>
+          <PostPagination prev={adjacent.prev} next={adjacent.next} />
+        </article>
+      </PostLayout>
+    </>
   )
 }
