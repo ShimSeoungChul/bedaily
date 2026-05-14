@@ -101,12 +101,14 @@ async function fromGithubReleases(repo, prefix, displayName, category, type, fil
 
 async function fetchSpringBoot() {
   const events = await fromGithubReleases(
-    'spring-projects/spring-boot', 'spring-boot', 'Spring Boot', 'Backend', 'release'
+    'spring-projects/spring-boot', 'spring-boot', 'Spring Boot', 'Backend', 'release',
+    (tag) => /^v?\d+\.\d+\.0$/.test(tag)
   )
-  // 예정 milestone
+  // 예정 milestone — x.y.0 형태만 포함
   const milestones = await getGithubMilestones('spring-projects/spring-boot')
   for (const m of milestones) {
     if (!m.due_on) continue
+    if (!/^\d+\.\d+\.0$/.test(m.title)) continue
     const date = toDateStr(m.due_on)
     if (!inRange(date)) continue
     events.push({
@@ -122,11 +124,13 @@ async function fetchSpringBoot() {
 
 async function fetchSpringFramework() {
   const events = await fromGithubReleases(
-    'spring-projects/spring-framework', 'spring-framework', 'Spring Framework', 'Backend', 'release'
+    'spring-projects/spring-framework', 'spring-framework', 'Spring Framework', 'Backend', 'release',
+    (tag) => /^v?\d+\.\d+\.0$/.test(tag)
   )
   const milestones = await getGithubMilestones('spring-projects/spring-framework')
   for (const m of milestones) {
     if (!m.due_on) continue
+    if (!/^\d+\.\d+\.0$/.test(m.title)) continue
     const date = toDateStr(m.due_on)
     if (!inRange(date)) continue
     events.push({
@@ -142,7 +146,8 @@ async function fetchSpringFramework() {
 
 async function fetchKotlin() {
   return fromGithubReleases(
-    'JetBrains/kotlin', 'kotlin', 'Kotlin', 'Java', 'release'
+    'JetBrains/kotlin', 'kotlin', 'Kotlin', 'Java', 'release',
+    (tag) => /^v?\d+\.\d+\.0$/.test(tag)
   )
 }
 
@@ -158,7 +163,7 @@ async function fetchHibernate() {
 async function fetchRedis() {
   return fromGithubReleases(
     'redis/redis', 'redis', 'Redis', 'Backend', 'release',
-    (tag) => /^\d+\.\d+\.\d+$/.test(tag) // v 없는 태그
+    (tag) => /^\d+\.\d+\.0$/.test(tag) // v 없는 태그, 마이너 버전만
   )
 }
 
@@ -206,7 +211,9 @@ async function fetchPostgreSQL() {
   const events = []
   for (const entry of data) {
     // latestReleaseDate: 해당 메이저 버전의 최신 패치 출시일
-    const date = entry.latestReleaseDate ?? entry.releaseDate
+    // 메이저 최초 릴리즈(x.0)만 포함 — 패치 버전 제외
+    if (!/^\d+\.0$/.test(entry.latest)) continue
+    const date = entry.releaseDate
     if (!date || !inRange(date)) continue
     events.push({
       slug: slugify(`postgresql-${entry.cycle}-${entry.latest}-release`),
