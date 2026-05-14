@@ -1,14 +1,5 @@
 [
   {
-    "slug": "kotlin-v2-3-10-release",
-    "title": "Kotlin v2.3.10 릴리즈",
-    "date": "2026-02-05",
-    "category": "Java",
-    "type": "release",
-    "link": "https://github.com/JetBrains/kotlin/releases/tag/v2.3.10",
-    "description": "Kotlin v2.3.10 정식 출시."
-  },
-  {
     "slug": "openai-sdk-v2-17-0-release",
     "title": "OpenAI SDK v2.17.0 릴리즈",
     "date": "2026-02-05",
@@ -25,24 +16,6 @@
     "type": "ai-release",
     "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.79.0",
     "description": "Anthropic SDK v0.79.0 정식 출시."
-  },
-  {
-    "slug": "redis-8-4-1-release",
-    "title": "Redis 8.4.1 릴리즈",
-    "date": "2026-02-08",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/redis/redis/releases/tag/8.4.1",
-    "description": "Redis 8.4.1 정식 출시."
-  },
-  {
-    "slug": "redis-8-2-4-release",
-    "title": "Redis 8.2.4 릴리즈",
-    "date": "2026-02-08",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/redis/redis/releases/tag/8.2.4",
-    "description": "Redis 8.2.4 정식 출시."
   },
   {
     "slug": "openai-sdk-v2-18-0-release",
@@ -81,24 +54,6 @@
     "description": "OpenAI SDK v2.19.0 정식 출시."
   },
   {
-    "slug": "spring-framework-v7-0-4-release",
-    "title": "Spring Framework v7.0.4 릴리즈",
-    "date": "2026-02-12",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-framework/releases/tag/v7.0.4",
-    "description": "Spring Framework v7.0.4 정식 출시."
-  },
-  {
-    "slug": "spring-framework-v6-2-16-release",
-    "title": "Spring Framework v6.2.16 릴리즈",
-    "date": "2026-02-12",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-framework/releases/tag/v6.2.16",
-    "description": "Spring Framework v6.2.16 정식 출시."
-  },
-  {
     "slug": "openai-sdk-v2-21-0-release",
     "title": "OpenAI SDK v2.21.0 릴리즈",
     "date": "2026-02-14",
@@ -126,15 +81,6 @@
     "description": "Anthropic SDK v0.80.0 정식 출시."
   },
   {
-    "slug": "spring-framework-v7-0-5-release",
-    "title": "Spring Framework v7.0.5 릴리즈",
-    "date": "2026-02-18",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-framework/releases/tag/v7.0.5",
-    "description": "Spring Framework v7.0.5 정식 출시."
-  },
-  {
     "slug": "anthropic-sdk-v0-82-0-release",
     "title": "Anthropic SDK v0.82.0 릴리즈",
     "date": "2026-02-18",
@@ -153,24 +99,6 @@
     "description": "Anthropic SDK v0.81.0 정식 출시."
   },
   {
-    "slug": "spring-boot-v4-0-3-release",
-    "title": "Spring Boot v4.0.3 릴리즈",
-    "date": "2026-02-19",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-boot/releases/tag/v4.0.3",
-    "description": "Spring Boot v4.0.3 정식 출시."
-  },
-  {
-    "slug": "spring-boot-v3-5-11-release",
-    "title": "Spring Boot v3.5.11 릴리즈",
-    "date": "2026-02-19",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-boot/releases/tag/v3.5.11",
-    "description": "Spring Boot v3.5.11 정식 출시."
-  },
-  {
     "slug": "anthropic-sdk-v0-83-0-release",
     "title": "Anthropic SDK v0.83.0 릴리즈",
     "date": "2026-02-19",
@@ -187,60 +115,6 @@
     "type": "release",
     "link": "https://kafka.apache.org/downloads",
     "description": "Apache Kafka 3.9 계열 최신 릴리즈 (3.9.2)."
-  },
-  {
-    "slug": "redis-8-6-1-release",
-    "title": "Redis 8.6.1 릴리즈",
-    "date": "2026-02-23",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/redis/redis/releases/tag/8.6.1",
-    "description": "Redis 8.6.1 정식 출시."
-  },
-  {
-    "slug": "redis-8-4-2-release",
-    "title": "Redis 8.4.2 릴리즈",
-    "date": "2026-02-23",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/redis/redis/releases/tag/8.4.2",
-    "description": "Redis 8.4.2 정식 출시."
-  },
-  {
-    "slug": "redis-8-2-5-release",
-    "title": "Redis 8.2.5 릴리즈",
-    "date": "2026-02-23",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/redis/redis/releases/tag/8.2.5",
-    "description": "Redis 8.2.5 정식 출시."
-  },
-  {
-    "slug": "redis-8-0-6-release",
-    "title": "Redis 8.0.6 릴리즈",
-    "date": "2026-02-23",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/redis/redis/releases/tag/8.0.6",
-    "description": "Redis 8.0.6 정식 출시."
-  },
-  {
-    "slug": "redis-7-4-8-release",
-    "title": "Redis 7.4.8 릴리즈",
-    "date": "2026-02-23",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/redis/redis/releases/tag/7.4.8",
-    "description": "Redis 7.4.8 정식 출시."
-  },
-  {
-    "slug": "redis-7-2-13-release",
-    "title": "Redis 7.2.13 릴리즈",
-    "date": "2026-02-23",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/redis/redis/releases/tag/7.2.13",
-    "description": "Redis 7.2.13 정식 출시."
   },
   {
     "slug": "postgresql-18-18-3-release",
@@ -342,24 +216,6 @@
     "description": "OpenAI SDK v2.25.0 정식 출시."
   },
   {
-    "slug": "spring-framework-v7-0-6-release",
-    "title": "Spring Framework v7.0.6 릴리즈",
-    "date": "2026-03-13",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-framework/releases/tag/v7.0.6",
-    "description": "Spring Framework v7.0.6 정식 출시."
-  },
-  {
-    "slug": "spring-framework-v6-2-17-release",
-    "title": "Spring Framework v6.2.17 릴리즈",
-    "date": "2026-03-13",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-framework/releases/tag/v6.2.17",
-    "description": "Spring Framework v6.2.17 정식 출시."
-  },
-  {
     "slug": "openai-sdk-v2-28-0-release",
     "title": "OpenAI SDK v2.28.0 릴리즈",
     "date": "2026-03-13",
@@ -376,15 +232,6 @@
     "type": "ai-release",
     "link": "https://github.com/openai/openai-python/releases/tag/v2.27.0",
     "description": "OpenAI SDK v2.27.0 정식 출시."
-  },
-  {
-    "slug": "kotlin-v2-3-20-release",
-    "title": "Kotlin v2.3.20 릴리즈",
-    "date": "2026-03-16",
-    "category": "Java",
-    "type": "release",
-    "link": "https://github.com/JetBrains/kotlin/releases/tag/v2.3.20",
-    "description": "Kotlin v2.3.20 정식 출시."
   },
   {
     "slug": "kafka-4-1-4-1-2-release",
@@ -441,33 +288,6 @@
     "description": "Anthropic SDK v0.86.0 정식 출시."
   },
   {
-    "slug": "spring-boot-v4-0-4-release",
-    "title": "Spring Boot v4.0.4 릴리즈",
-    "date": "2026-03-19",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-boot/releases/tag/v4.0.4",
-    "description": "Spring Boot v4.0.4 정식 출시."
-  },
-  {
-    "slug": "spring-boot-v3-5-12-release",
-    "title": "Spring Boot v3.5.12 릴리즈",
-    "date": "2026-03-19",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-boot/releases/tag/v3.5.12",
-    "description": "Spring Boot v3.5.12 정식 출시."
-  },
-  {
-    "slug": "redis-8-6-2-release",
-    "title": "Redis 8.6.2 릴리즈",
-    "date": "2026-03-24",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/redis/redis/releases/tag/8.6.2",
-    "description": "Redis 8.6.2 정식 출시."
-  },
-  {
     "slug": "openai-sdk-v2-30-0-release",
     "title": "OpenAI SDK v2.30.0 릴리즈",
     "date": "2026-03-25",
@@ -475,24 +295,6 @@
     "type": "ai-release",
     "link": "https://github.com/openai/openai-python/releases/tag/v2.30.0",
     "description": "OpenAI SDK v2.30.0 정식 출시."
-  },
-  {
-    "slug": "spring-boot-v4-0-5-release",
-    "title": "Spring Boot v4.0.5 릴리즈",
-    "date": "2026-03-26",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-boot/releases/tag/v4.0.5",
-    "description": "Spring Boot v4.0.5 정식 출시."
-  },
-  {
-    "slug": "spring-boot-v3-5-13-release",
-    "title": "Spring Boot v3.5.13 릴리즈",
-    "date": "2026-03-26",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-boot/releases/tag/v3.5.13",
-    "description": "Spring Boot v3.5.13 정식 출시."
   },
   {
     "slug": "anthropic-sdk-v0-87-0-release",
@@ -603,51 +405,6 @@
     "description": "Anthropic SDK v0.96.0 정식 출시."
   },
   {
-    "slug": "spring-framework-v7-0-7-release",
-    "title": "Spring Framework v7.0.7 릴리즈",
-    "date": "2026-04-17",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-framework/releases/tag/v7.0.7",
-    "description": "Spring Framework v7.0.7 정식 출시."
-  },
-  {
-    "slug": "spring-framework-v6-2-18-release",
-    "title": "Spring Framework v6.2.18 릴리즈",
-    "date": "2026-04-17",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-framework/releases/tag/v6.2.18",
-    "description": "Spring Framework v6.2.18 정식 출시."
-  },
-  {
-    "slug": "spring-boot-v4-0-6-release",
-    "title": "Spring Boot v4.0.6 릴리즈",
-    "date": "2026-04-23",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-boot/releases/tag/v4.0.6",
-    "description": "Spring Boot v4.0.6 정식 출시."
-  },
-  {
-    "slug": "spring-boot-v3-5-14-release",
-    "title": "Spring Boot v3.5.14 릴리즈",
-    "date": "2026-04-23",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-boot/releases/tag/v3.5.14",
-    "description": "Spring Boot v3.5.14 정식 출시."
-  },
-  {
-    "slug": "kotlin-v2-3-21-release",
-    "title": "Kotlin v2.3.21 릴리즈",
-    "date": "2026-04-23",
-    "category": "Java",
-    "type": "release",
-    "link": "https://github.com/JetBrains/kotlin/releases/tag/v2.3.21",
-    "description": "Kotlin v2.3.21 정식 출시."
-  },
-  {
     "slug": "anthropic-sdk-v0-97-0-release",
     "title": "Anthropic SDK v0.97.0 릴리즈",
     "date": "2026-04-23",
@@ -684,24 +441,6 @@
     "description": "OpenAI Codex rust-v0.128.0 정식 출시."
   },
   {
-    "slug": "spring-framework-6-2-19-milestone",
-    "title": "Spring Framework 6.2.19 출시 예정",
-    "date": "2026-05-18",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-framework/milestone/432",
-    "description": "Spring Framework 6.2.19 릴리즈 예정일."
-  },
-  {
-    "slug": "spring-framework-7-0-8-milestone",
-    "title": "Spring Framework 7.0.8 출시 예정",
-    "date": "2026-05-18",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-framework/milestone/433",
-    "description": "Spring Framework 7.0.8 릴리즈 예정일."
-  },
-  {
     "slug": "spring-boot-4-1-0-milestone",
     "title": "Spring Boot 4.1.0 출시 예정",
     "date": "2026-05-21",
@@ -709,24 +448,6 @@
     "type": "release",
     "link": "https://github.com/spring-projects/spring-boot/milestone/413",
     "description": "Spring Boot 4.1.0 릴리즈 예정일."
-  },
-  {
-    "slug": "spring-boot-3-5-15-milestone",
-    "title": "Spring Boot 3.5.15 출시 예정",
-    "date": "2026-05-21",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-boot/milestone/423",
-    "description": "Spring Boot 3.5.15 릴리즈 예정일."
-  },
-  {
-    "slug": "spring-boot-4-0-7-milestone",
-    "title": "Spring Boot 4.0.7 출시 예정",
-    "date": "2026-05-21",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-boot/milestone/424",
-    "description": "Spring Boot 4.0.7 릴리즈 예정일."
   },
   {
     "slug": "spring-framework-7-1-0-m1-milestone",
