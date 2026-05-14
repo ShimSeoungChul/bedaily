@@ -1,59 +1,5 @@
 [
   {
-    "slug": "openai-sdk-v2-17-0-release",
-    "title": "OpenAI SDK v2.17.0 릴리즈",
-    "date": "2026-02-05",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/openai/openai-python/releases/tag/v2.17.0",
-    "description": "OpenAI SDK v2.17.0 정식 출시."
-  },
-  {
-    "slug": "anthropic-sdk-v0-79-0-release",
-    "title": "Anthropic SDK v0.79.0 릴리즈",
-    "date": "2026-02-07",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.79.0",
-    "description": "Anthropic SDK v0.79.0 정식 출시."
-  },
-  {
-    "slug": "openai-sdk-v2-18-0-release",
-    "title": "OpenAI SDK v2.18.0 릴리즈",
-    "date": "2026-02-09",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/openai/openai-python/releases/tag/v2.18.0",
-    "description": "OpenAI SDK v2.18.0 정식 출시."
-  },
-  {
-    "slug": "redis-8-6-0-release",
-    "title": "Redis 8.6.0 릴리즈",
-    "date": "2026-02-10",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/redis/redis/releases/tag/8.6.0",
-    "description": "Redis 8.6.0 정식 출시."
-  },
-  {
-    "slug": "openai-sdk-v2-20-0-release",
-    "title": "OpenAI SDK v2.20.0 릴리즈",
-    "date": "2026-02-10",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/openai/openai-python/releases/tag/v2.20.0",
-    "description": "OpenAI SDK v2.20.0 정식 출시."
-  },
-  {
-    "slug": "openai-sdk-v2-19-0-release",
-    "title": "OpenAI SDK v2.19.0 릴리즈",
-    "date": "2026-02-10",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/openai/openai-python/releases/tag/v2.19.0",
-    "description": "OpenAI SDK v2.19.0 정식 출시."
-  },
-  {
     "slug": "openai-sdk-v2-21-0-release",
     "title": "OpenAI SDK v2.21.0 릴리즈",
     "date": "2026-02-14",
@@ -70,33 +16,6 @@
     "type": "release",
     "link": "https://kafka.apache.org/downloads",
     "description": "Apache Kafka 4.2 계열 최신 릴리즈 (4.2.0)."
-  },
-  {
-    "slug": "anthropic-sdk-v0-80-0-release",
-    "title": "Anthropic SDK v0.80.0 릴리즈",
-    "date": "2026-02-17",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.80.0",
-    "description": "Anthropic SDK v0.80.0 정식 출시."
-  },
-  {
-    "slug": "anthropic-sdk-v0-82-0-release",
-    "title": "Anthropic SDK v0.82.0 릴리즈",
-    "date": "2026-02-18",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.82.0",
-    "description": "Anthropic SDK v0.82.0 정식 출시."
-  },
-  {
-    "slug": "anthropic-sdk-v0-81-0-release",
-    "title": "Anthropic SDK v0.81.0 릴리즈",
-    "date": "2026-02-18",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.81.0",
-    "description": "Anthropic SDK v0.81.0 정식 출시."
   },
   {
     "slug": "anthropic-sdk-v0-83-0-release",
@@ -414,15 +333,6 @@
     "description": "Anthropic SDK v0.97.0 정식 출시."
   },
   {
-    "slug": "openai-codex-rust-v0-125-0-release",
-    "title": "OpenAI Codex rust-v0.125.0 릴리즈",
-    "date": "2026-04-24",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/openai/codex/releases/tag/rust-v0.125.0",
-    "description": "OpenAI Codex rust-v0.125.0 정식 출시."
-  },
-  {
     "slug": "openai-sdk-v2-33-0-release",
     "title": "OpenAI SDK v2.33.0 릴리즈",
     "date": "2026-04-28",
@@ -432,13 +342,76 @@
     "description": "OpenAI SDK v2.33.0 정식 출시."
   },
   {
-    "slug": "openai-codex-rust-v0-128-0-release",
-    "title": "OpenAI Codex rust-v0.128.0 릴리즈",
-    "date": "2026-04-30",
+    "slug": "anthropic-sdk-v0-98-0-release",
+    "title": "Anthropic SDK v0.98.0 릴리즈",
+    "date": "2026-05-04",
     "category": "AI",
     "type": "ai-release",
-    "link": "https://github.com/openai/codex/releases/tag/rust-v0.128.0",
-    "description": "OpenAI Codex rust-v0.128.0 정식 출시."
+    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.98.0",
+    "description": "Anthropic SDK v0.98.0 정식 출시."
+  },
+  {
+    "slug": "openai-sdk-v2-34-0-release",
+    "title": "OpenAI SDK v2.34.0 릴리즈",
+    "date": "2026-05-04",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/openai/openai-python/releases/tag/v2.34.0",
+    "description": "OpenAI SDK v2.34.0 정식 출시."
+  },
+  {
+    "slug": "anthropic-sdk-v0-99-0-release",
+    "title": "Anthropic SDK v0.99.0 릴리즈",
+    "date": "2026-05-05",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.99.0",
+    "description": "Anthropic SDK v0.99.0 정식 출시."
+  },
+  {
+    "slug": "anthropic-sdk-v0-100-0-release",
+    "title": "Anthropic SDK v0.100.0 릴리즈",
+    "date": "2026-05-06",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.100.0",
+    "description": "Anthropic SDK v0.100.0 정식 출시."
+  },
+  {
+    "slug": "openai-sdk-v2-35-0-release",
+    "title": "OpenAI SDK v2.35.0 릴리즈",
+    "date": "2026-05-06",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/openai/openai-python/releases/tag/v2.35.0",
+    "description": "OpenAI SDK v2.35.0 정식 출시."
+  },
+  {
+    "slug": "openai-codex-rust-v0-129-0-release",
+    "title": "OpenAI Codex rust-v0.129.0 릴리즈",
+    "date": "2026-05-07",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/openai/codex/releases/tag/rust-v0.129.0",
+    "description": "OpenAI Codex rust-v0.129.0 정식 출시."
+  },
+  {
+    "slug": "openai-sdk-v2-36-0-release",
+    "title": "OpenAI SDK v2.36.0 릴리즈",
+    "date": "2026-05-07",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/openai/openai-python/releases/tag/v2.36.0",
+    "description": "OpenAI SDK v2.36.0 정식 출시."
+  },
+  {
+    "slug": "openai-codex-rust-v0-130-0-release",
+    "title": "OpenAI Codex rust-v0.130.0 릴리즈",
+    "date": "2026-05-08",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/openai/codex/releases/tag/rust-v0.130.0",
+    "description": "OpenAI Codex rust-v0.130.0 정식 출시."
   },
   {
     "slug": "spring-boot-4-1-0-milestone",
@@ -452,7 +425,7 @@
   {
     "slug": "spring-framework-7-1-0-m1-milestone",
     "title": "Spring Framework 7.1.0-M1 출시 예정",
-    "date": "2026-06-11",
+    "date": "2026-07-16",
     "category": "Backend",
     "type": "release",
     "link": "https://github.com/spring-projects/spring-framework/milestone/431",
