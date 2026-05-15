@@ -1,0 +1,192 @@
+---
+title: "Hibernate ORM 7 마이그레이션 — 달라진 것들과 그 이유"
+date: "2026-05-15"
+category: "Java"
+tags: ["Hibernate ORM 7", "JPA 3.2", "Jakarta EE 11", "마이그레이션", "Spring Boot 4"]
+summary: "Hibernate ORM 7은 10년 넘게 쌓인 구식 API를 정리하고 JPA 표준에 집중하는 방향으로 재정비됐습니다. 가장 많이 마주칠 Breaking Changes와 배경을 정리합니다."
+published: true
+---
+
+## 개요
+
+Hibernate 7에서 가장 먼저 눈에 띄는 건 기능 추가가 아니다. 제거 목록이다.
+
+`session.save()`, `session.update()`, `session.delete()` — 오랫동안 써온 메서드들이 전부 사라졌다. `@Where` 애너테이션도, `@Proxy`도. 처음엔 불편하게 느껴지지만 방향을 보면 납득이 간다. Hibernate가 수년간 JPA 표준과 병행해서 유지하던 자체 API를 이번에 정리한 것이다.
+
+세 가지 변화가 이 버전을 특별하게 만든다.
+
+- **Java 17 필수**: 6.x의 Java 11 지원이 끝났다.
+- **Jakarta EE 11 / JPA 3.2**: Spring Boot 4와 같은 기반.
+- **라이선스 변경**: LGPL → **Apache License 2.0**. 기업 법무팀에서 LGPL을 꺼리는 경우가 있었는데, 이 결정으로 도입 장벽이 낮아졌다.
+
+## Session API 정리 — JPA 표준으로 통일
+
+오랜 Hibernate 사용자라면 `session.save()`와 `session.persist()`를 혼용했을 것이다. 둘 다 됐으니까. Hibernate 7은 이 중복을 끝냈다.
+
+| 제거된 메서드 | 대체 |
+|---|---|
+| `session.save()` | `session.persist()` |
+| `session.update()` | `session.merge()` |
+| `session.saveOrUpdate()` | `persist()` 또는 `merge()` |
+| `session.delete()` | `session.remove()` |
+| `session.get()` | `session.find()` |
+| `session.load()` | `session.getReference()` |
+
+Cascade 타입도 함께 정리됐다.
+
+```java filename="CascadeType.java"
+// 제거됨
+CascadeType.SAVE_UPDATE  // → CascadeType.PERSIST + CascadeType.MERGE
+CascadeType.DELETE       // → CascadeType.REMOVE
+```
+
+이건 단순한 이름 변경이 아니다. Hibernate 특화 메서드들은 JPA 표준 메서드와 미묘하게 다른 동작을 했다. 예를 들어 `save()`는 즉시 INSERT를 발생시키는 경우가 있었지만 `persist()`는 flush 시점까지 지연한다. 이 차이를 모르고 코드를 짠 경우 업그레이드 후 동작이 달라질 수 있으니 주의해야 한다.
+
+## Detached 엔티티 처리 강화
+
+Hibernate 7에서 실제로 가장 많이 마주칠 변화다.
+
+```java filename="DetachedEntityService.java"
+// ❌ Hibernate 7에서 EntityExistsException
+Parent parent = session.find(Parent.class, parentId);
+parent.addChild(detachedChild);   // CascadeType.PERSIST 상황
+session.flush();
+
+// ✅ merge 먼저 필수
+Child managed = session.merge(detachedChild);
+parent.addChild(managed);
+session.flush();
+```
+
+Detached 엔티티에 `refresh()`나 `lock()`을 직접 호출하는 것도 이제 `IllegalArgumentException`이다.
+
+```java filename="LockService.java"
+// ❌ 분리된 엔티티에 직접 lock — Hibernate 7에서 예외 발생
+session.lock(detachedEntity, LockMode.PESSIMISTIC_WRITE);
+
+// ✅ 먼저 영속 컨텍스트로 되돌린 뒤 lock
+Entity managed = session.merge(detachedEntity);
+session.lock(managed, LockMode.PESSIMISTIC_WRITE);
+```
+
+왜 이 변화가 나왔는지는 이해할 수 있다. Detached 엔티티에 대한 암묵적 처리는 예상치 못한 동작의 주요 원인이었다. 명시적으로 merge를 거치도록 강제하는 게 더 안전한 코드로 이어진다.
+
+## Annotation 변경
+
+자주 쓰던 Hibernate 전용 애너테이션들이 교체됐다.
+
+```java filename="Product.java"
+// ❌ Hibernate 6
+@Where(clause = "deleted = false")
+public class Product { ... }
+
+// ✅ Hibernate 7
+@SQLRestriction("deleted = false")
+public class Product { ... }
+```
+
+| 제거됨 | 대체 |
+|---|---|
+| `@Where` | `@SQLRestriction` |
+| `@Target` | `@TargetEmbeddable` |
+| `@Proxy` | 제거 (기본 프록시 생성) |
+| `@Persister` | 제거 |
+| `@Loader` | 제거 |
+
+## 쿼리 API — 명시적 select 필수
+
+암묵적 select 쿼리가 거부된다.
+
+```java filename="ProductRepository.java"
+// ❌ Hibernate 7에서 오류 — select 절 없음
+List<?> results = session.createQuery("from Product, Category").getResultList();
+
+// ✅ 명시적 select
+List<Object[]> results = session.createQuery(
+    "select p, c from Product p, Category c"
+).getResultList();
+
+// ✅ 단일 엔티티라면 별칭으로
+List<Product> products = session.createQuery(
+    "from Product this", Product.class
+).getResultList();
+```
+
+## StatelessSession 동작 변화
+
+배치 처리에 `StatelessSession`을 쓴다면 두 가지를 확인해야 한다.
+
+첫째, 2차 캐시가 이제 기본으로 활성화됐다. Hibernate 6까지는 `StatelessSession`이 2차 캐시를 무시했는데 7부터는 쓴다. 이전 동작을 원하면 명시적으로 꺼야 한다.
+
+```java filename="BatchProcessor.java"
+StatelessSession session = sessionFactory.openStatelessSession();
+session.setCacheMode(CacheMode.IGNORE);  // 이전 동작 복구
+```
+
+둘째, 새로 추가된 배치 메서드가 있다.
+
+```java filename="BatchInsertService.java"
+// 새로 추가 — 여러 엔티티 한 번에 처리
+session.insertMultiple(entities);
+session.updateMultiple(entities);
+session.deleteMultiple(entities);
+```
+
+## DB 방언 변경사항
+
+Oracle과 MySQL을 쓴다면 확인이 필요하다.
+
+**Oracle**: Java의 `float`/`double`이 기존 `number` 타입 대신 `binary_float`/`binary_double`로 매핑된다. 정밀도 처리 방식이 다르므로 숫자 계산 결과가 달라질 수 있다.
+
+```properties filename="application.properties"
+# 이전 Oracle 매핑으로 복구
+hibernate.dialect.oracle.use_binary_floats=false
+```
+
+**MySQL/MariaDB**: Array 타입이 `VARBINARY` 대신 `JSON_ARRAY`로 변경됐다. 기존 컬럼 타입과 불일치가 발생할 수 있다.
+
+```properties filename="application.properties"
+# 이전 VARBINARY 형식 유지
+hibernate.type.preferred_array_jdbc_type=VARBINARY
+```
+
+## 버전별 추가 기능
+
+> 마이너 버전 출시 때마다 업데이트됩니다.
+
+### Hibernate ORM 7.0 (2025년 초)
+- JPA 3.2, Jakarta EE 11 지원
+- Java 17 최소 요건
+- Apache License 2.0 전환
+- Session API 구식 메서드 제거
+
+### Hibernate ORM 7.1
+- Pessimistic Locking API 개선
+- Spring Boot 4.0 기본 탑재 버전
+
+### Hibernate ORM 7.2
+- `@EmbeddedTable` 추가 — 임베드 타입을 별도 테이블에 매핑
+- SQL Server Vector 타입 지원
+
+### Hibernate ORM 7.3
+- `@NaturalIdClass` 추가 — 복합 자연키 선언 간소화
+
+### Hibernate ORM 7.4
+- `hbm.xml` → 애너테이션 자동 변환 도구 포함
+- `@Temporal` 관련 정밀도 처리 개선
+
+## Spring Boot 4와의 관계
+
+Spring Boot 4는 Hibernate ORM 7.1을 기본으로 탑재한다. Boot 4로 업그레이드한다면 Hibernate 마이그레이션도 함께 계획에 넣어야 한다.
+
+좋은 소식은 Boot 4의 auto-configuration을 그대로 쓴다면 Session Factory 설정은 손댈 게 없다는 것이다. 실질적으로 변경이 필요한 건 엔티티 코드와 레포지토리 안에 직접 작성된 Hibernate 특화 API 호출들이다.
+
+## 마이그레이션 체크리스트
+
+- `session.save()` / `update()` / `delete()` → `persist()` / `merge()` / `remove()` 전환
+- `CascadeType.SAVE_UPDATE` / `DELETE` 제거 → `PERSIST` + `MERGE` / `REMOVE`로 교체
+- `@Where` → `@SQLRestriction` 치환
+- Detached 엔티티 처리 코드 — `merge()` 선행 여부 확인
+- HQL에서 `select` 절 없는 다중 엔티티 쿼리 수정
+- Oracle / MySQL 사용 시 방언 변경사항 확인
+- `StatelessSession` 사용 코드에서 캐시 모드 명시 검토
