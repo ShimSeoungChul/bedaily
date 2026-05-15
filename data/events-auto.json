@@ -27,15 +27,6 @@
     "description": "Anthropic SDK v0.83.0 정식 출시."
   },
   {
-    "slug": "kafka-3-9-3-9-2-release",
-    "title": "Apache Kafka 3.9.2 릴리즈",
-    "date": "2026-02-21",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://kafka.apache.org/downloads",
-    "description": "Apache Kafka 3.9 계열 최신 릴리즈 (3.9.2)."
-  },
-  {
     "slug": "postgresql-18-18-3-release",
     "title": "PostgreSQL 18.3 릴리즈",
     "date": "2026-02-23",
@@ -153,15 +144,6 @@
     "description": "OpenAI SDK v2.27.0 정식 출시."
   },
   {
-    "slug": "kafka-4-1-4-1-2-release",
-    "title": "Apache Kafka 4.1.2 릴리즈",
-    "date": "2026-03-16",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://kafka.apache.org/downloads",
-    "description": "Apache Kafka 4.1 계열 최신 릴리즈 (4.1.2)."
-  },
-  {
     "slug": "anthropic-sdk-v0-85-0-release",
     "title": "Anthropic SDK v0.85.0 릴리즈",
     "date": "2026-03-16",
@@ -187,15 +169,6 @@
     "type": "release",
     "link": "https://openjdk.org/projects/jdk/26/",
     "description": "OpenJDK 26 정식 출시."
-  },
-  {
-    "slug": "kafka-4-0-4-0-2-release",
-    "title": "Apache Kafka 4.0.2 릴리즈",
-    "date": "2026-03-18",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://kafka.apache.org/downloads",
-    "description": "Apache Kafka 4.0 계열 최신 릴리즈 (4.0.2)."
   },
   {
     "slug": "anthropic-sdk-v0-86-0-release",

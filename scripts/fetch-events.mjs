@@ -174,7 +174,9 @@ async function fetchKafka() {
 
   const events = []
   for (const entry of data) {
-    const date = entry.latestReleaseDate ?? entry.releaseDate
+    // 새 minor 버전 최초 출시(x.y.0)만 포함
+    if (!/^\d+\.\d+\.0$/.test(entry.latest)) continue
+    const date = entry.releaseDate
     if (!date || !inRange(date)) continue
     events.push({
       slug: slugify(`kafka-${entry.cycle}-${entry.latest}-release`),
@@ -183,7 +185,7 @@ async function fetchKafka() {
       category: 'Backend',
       type: 'release',
       link: `https://kafka.apache.org/downloads`,
-      description: `Apache Kafka ${entry.cycle} 계열 최신 릴리즈 (${entry.latest}).`,
+      description: `Apache Kafka ${entry.cycle} 계열 출시.`,
     })
   }
   return events
@@ -192,14 +194,16 @@ async function fetchKafka() {
 /** Jakarta Persistence (JPA) */
 async function fetchJakartaPersistence() {
   return fromGithubReleases(
-    'jakartaee/persistence', 'jakarta-persistence', 'Jakarta Persistence', 'Java', 'release'
+    'jakartaee/persistence', 'jakarta-persistence', 'Jakarta Persistence', 'Java', 'release',
+    (tag) => /^v?\d+\.\d+\.0$/.test(tag)
   )
 }
 
 /** OpenAI Codex CLI */
 async function fetchCodex() {
   return fromGithubReleases(
-    'openai/codex', 'openai-codex', 'OpenAI Codex', 'AI', 'ai-release'
+    'openai/codex', 'openai-codex', 'OpenAI Codex', 'AI', 'ai-release',
+    (tag) => /^v?\d+\.\d+\.0$/.test(tag)
   )
 }
 
