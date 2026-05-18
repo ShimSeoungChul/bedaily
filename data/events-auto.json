@@ -1,77 +1,5 @@
 [
   {
-    "slug": "openai-sdk-v2-21-0-release",
-    "title": "OpenAI SDK v2.21.0 릴리즈",
-    "date": "2026-02-14",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/openai/openai-python/releases/tag/v2.21.0",
-    "description": "OpenAI SDK v2.21.0 정식 출시."
-  },
-  {
-    "slug": "kafka-4-2-4-2-0-release",
-    "title": "Apache Kafka 4.2.0 릴리즈",
-    "date": "2026-02-16",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://kafka.apache.org/downloads",
-    "description": "Apache Kafka 4.2 계열 최신 릴리즈 (4.2.0)."
-  },
-  {
-    "slug": "anthropic-sdk-v0-83-0-release",
-    "title": "Anthropic SDK v0.83.0 릴리즈",
-    "date": "2026-02-19",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.83.0",
-    "description": "Anthropic SDK v0.83.0 정식 출시."
-  },
-  {
-    "slug": "postgresql-18-18-3-release",
-    "title": "PostgreSQL 18.3 릴리즈",
-    "date": "2026-02-23",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://www.postgresql.org/docs/18/release-18-3.html",
-    "description": "PostgreSQL 18 계열 최신 릴리즈 (18.3)."
-  },
-  {
-    "slug": "postgresql-17-17-9-release",
-    "title": "PostgreSQL 17.9 릴리즈",
-    "date": "2026-02-23",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://www.postgresql.org/docs/17/release-17-9.html",
-    "description": "PostgreSQL 17 계열 최신 릴리즈 (17.9)."
-  },
-  {
-    "slug": "postgresql-16-16-13-release",
-    "title": "PostgreSQL 16.13 릴리즈",
-    "date": "2026-02-23",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://www.postgresql.org/docs/16/release-16-13.html",
-    "description": "PostgreSQL 16 계열 최신 릴리즈 (16.13)."
-  },
-  {
-    "slug": "postgresql-15-15-17-release",
-    "title": "PostgreSQL 15.17 릴리즈",
-    "date": "2026-02-23",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://www.postgresql.org/docs/15/release-15-17.html",
-    "description": "PostgreSQL 15 계열 최신 릴리즈 (15.17)."
-  },
-  {
-    "slug": "postgresql-14-14-22-release",
-    "title": "PostgreSQL 14.22 릴리즈",
-    "date": "2026-02-23",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://www.postgresql.org/docs/14/release-14-22.html",
-    "description": "PostgreSQL 14 계열 최신 릴리즈 (14.22)."
-  },
-  {
     "slug": "openai-sdk-v2-22-0-release",
     "title": "OpenAI SDK v2.22.0 릴리즈",
     "date": "2026-02-23",
@@ -97,15 +25,6 @@
     "type": "ai-release",
     "link": "https://github.com/openai/openai-python/releases/tag/v2.23.0",
     "description": "OpenAI SDK v2.23.0 정식 출시."
-  },
-  {
-    "slug": "anthropic-sdk-v0-84-0-release",
-    "title": "Anthropic SDK v0.84.0 릴리즈",
-    "date": "2026-02-25",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.84.0",
-    "description": "Anthropic SDK v0.84.0 정식 출시."
   },
   {
     "slug": "openai-sdk-v2-26-0-release",
@@ -360,15 +279,6 @@
     "description": "OpenAI SDK v2.35.0 정식 출시."
   },
   {
-    "slug": "openai-codex-rust-v0-129-0-release",
-    "title": "OpenAI Codex rust-v0.129.0 릴리즈",
-    "date": "2026-05-07",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/openai/codex/releases/tag/rust-v0.129.0",
-    "description": "OpenAI Codex rust-v0.129.0 정식 출시."
-  },
-  {
     "slug": "openai-sdk-v2-36-0-release",
     "title": "OpenAI SDK v2.36.0 릴리즈",
     "date": "2026-05-07",
@@ -378,31 +288,40 @@
     "description": "OpenAI SDK v2.36.0 정식 출시."
   },
   {
-    "slug": "openai-codex-rust-v0-130-0-release",
-    "title": "OpenAI Codex rust-v0.130.0 릴리즈",
-    "date": "2026-05-08",
+    "slug": "anthropic-sdk-v0-101-0-release",
+    "title": "Anthropic SDK v0.101.0 릴리즈",
+    "date": "2026-05-11",
     "category": "AI",
     "type": "ai-release",
-    "link": "https://github.com/openai/codex/releases/tag/rust-v0.130.0",
-    "description": "OpenAI Codex rust-v0.130.0 정식 출시."
+    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.101.0",
+    "description": "Anthropic SDK v0.101.0 정식 출시."
+  },
+  {
+    "slug": "anthropic-sdk-v0-102-0-release",
+    "title": "Anthropic SDK v0.102.0 릴리즈",
+    "date": "2026-05-13",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.102.0",
+    "description": "Anthropic SDK v0.102.0 정식 출시."
+  },
+  {
+    "slug": "openai-sdk-v2-37-0-release",
+    "title": "OpenAI SDK v2.37.0 릴리즈",
+    "date": "2026-05-15",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/openai/openai-python/releases/tag/v2.37.0",
+    "description": "OpenAI SDK v2.37.0 정식 출시."
   },
   {
     "slug": "spring-boot-4-1-0-milestone",
     "title": "Spring Boot 4.1.0 출시 예정",
-    "date": "2026-05-21",
+    "date": "2026-06-03",
     "category": "Backend",
     "type": "release",
     "link": "https://github.com/spring-projects/spring-boot/milestone/413",
     "description": "Spring Boot 4.1.0 릴리즈 예정일."
-  },
-  {
-    "slug": "spring-framework-7-1-0-m1-milestone",
-    "title": "Spring Framework 7.1.0-M1 출시 예정",
-    "date": "2026-07-16",
-    "category": "Backend",
-    "type": "release",
-    "link": "https://github.com/spring-projects/spring-framework/milestone/431",
-    "description": "Spring Framework 7.1.0-M1 릴리즈 예정일."
   },
   {
     "slug": "java-27-ga-release",
