@@ -63,33 +63,6 @@
     "description": "OpenAI SDK v2.30.0 정식 출시."
   },
   {
-    "slug": "anthropic-sdk-v0-89-0-release",
-    "title": "Anthropic SDK v0.89.0 릴리즈",
-    "date": "2026-04-03",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.89.0",
-    "description": "Anthropic SDK v0.89.0 정식 출시."
-  },
-  {
-    "slug": "anthropic-sdk-v0-91-0-release",
-    "title": "Anthropic SDK v0.91.0 릴리즈",
-    "date": "2026-04-07",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.91.0",
-    "description": "Anthropic SDK v0.91.0 정식 출시."
-  },
-  {
-    "slug": "anthropic-sdk-v0-90-0-release",
-    "title": "Anthropic SDK v0.90.0 릴리즈",
-    "date": "2026-04-07",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.90.0",
-    "description": "Anthropic SDK v0.90.0 정식 출시."
-  },
-  {
     "slug": "anthropic-sdk-v0-92-0-release",
     "title": "Anthropic SDK v0.92.0 릴리즈",
     "date": "2026-04-08",
@@ -279,9 +252,36 @@
     "description": "OpenAI SDK v2.38.0 정식 출시."
   },
   {
+    "slug": "redis-8-8-0-release",
+    "title": "Redis 8.8.0 릴리즈",
+    "date": "2026-05-25",
+    "category": "Backend",
+    "type": "release",
+    "link": "https://github.com/redis/redis/releases/tag/8.8.0",
+    "description": "Redis 8.8.0 정식 출시."
+  },
+  {
+    "slug": "hibernate-orm-7-4-0-release",
+    "title": "Hibernate ORM 7.4.0 릴리즈",
+    "date": "2026-05-26",
+    "category": "Java",
+    "type": "release",
+    "link": "https://github.com/hibernate/hibernate-orm/releases/tag/7.4.0",
+    "description": "Hibernate ORM 7.4.0 정식 출시."
+  },
+  {
+    "slug": "anthropic-sdk-v0-105-0-release",
+    "title": "Anthropic SDK v0.105.0 릴리즈",
+    "date": "2026-05-28",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.105.0",
+    "description": "Anthropic SDK v0.105.0 정식 출시."
+  },
+  {
     "slug": "spring-boot-4-1-0-milestone",
     "title": "Spring Boot 4.1.0 출시 예정",
-    "date": "2026-06-03",
+    "date": "2026-06-10",
     "category": "Backend",
     "type": "release",
     "link": "https://github.com/spring-projects/spring-boot/milestone/413",
