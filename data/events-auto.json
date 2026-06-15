@@ -1,23 +1,5 @@
 [
   {
-    "slug": "openai-sdk-v2-28-0-release",
-    "title": "OpenAI SDK v2.28.0 릴리즈",
-    "date": "2026-03-13",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/openai/openai-python/releases/tag/v2.28.0",
-    "description": "OpenAI SDK v2.28.0 정식 출시."
-  },
-  {
-    "slug": "openai-sdk-v2-27-0-release",
-    "title": "OpenAI SDK v2.27.0 릴리즈",
-    "date": "2026-03-13",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/openai/openai-python/releases/tag/v2.27.0",
-    "description": "OpenAI SDK v2.27.0 정식 출시."
-  },
-  {
     "slug": "openai-sdk-v2-29-0-release",
     "title": "OpenAI SDK v2.29.0 릴리즈",
     "date": "2026-03-17",
@@ -54,15 +36,6 @@
     "description": "OpenAI SDK v2.31.0 정식 출시."
   },
   {
-    "slug": "anthropic-sdk-v0-95-0-release",
-    "title": "Anthropic SDK v0.95.0 릴리즈",
-    "date": "2026-04-14",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.95.0",
-    "description": "Anthropic SDK v0.95.0 정식 출시."
-  },
-  {
     "slug": "openai-sdk-v2-32-0-release",
     "title": "OpenAI SDK v2.32.0 릴리즈",
     "date": "2026-04-15",
@@ -70,15 +43,6 @@
     "type": "ai-release",
     "link": "https://github.com/openai/openai-python/releases/tag/v2.32.0",
     "description": "OpenAI SDK v2.32.0 정식 출시."
-  },
-  {
-    "slug": "anthropic-sdk-v0-96-0-release",
-    "title": "Anthropic SDK v0.96.0 릴리즈",
-    "date": "2026-04-16",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.96.0",
-    "description": "Anthropic SDK v0.96.0 정식 출시."
   },
   {
     "slug": "anthropic-sdk-v0-97-0-release",
@@ -297,13 +261,31 @@
     "description": "Anthropic SDK v0.107.0 정식 출시."
   },
   {
-    "slug": "spring-boot-4-1-0-milestone",
-    "title": "Spring Boot 4.1.0 출시 예정",
+    "slug": "anthropic-sdk-v0-109-0-release",
+    "title": "Anthropic SDK v0.109.0 릴리즈",
+    "date": "2026-06-09",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.109.0",
+    "description": "Anthropic SDK v0.109.0 정식 출시."
+  },
+  {
+    "slug": "anthropic-sdk-v0-108-0-release",
+    "title": "Anthropic SDK v0.108.0 릴리즈",
+    "date": "2026-06-09",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.108.0",
+    "description": "Anthropic SDK v0.108.0 정식 출시."
+  },
+  {
+    "slug": "spring-boot-v4-1-0-release",
+    "title": "Spring Boot v4.1.0 릴리즈",
     "date": "2026-06-10",
     "category": "Backend",
     "type": "release",
-    "link": "https://github.com/spring-projects/spring-boot/milestone/413",
-    "description": "Spring Boot 4.1.0 릴리즈 예정일."
+    "link": "https://github.com/spring-projects/spring-boot/releases/tag/v4.1.0",
+    "description": "Spring Boot v4.1.0 정식 출시."
   },
   {
     "slug": "java-27-ga-release",
