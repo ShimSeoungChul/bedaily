@@ -10,7 +10,7 @@ export function getHighlighter(): Promise<Highlighter> {
         'typescript', 'javascript', 'java', 'kotlin',
         'bash', 'shell', 'yaml', 'json', 'dockerfile',
         'sql', 'python', 'go', 'xml', 'html', 'css',
-        'markdown', 'mdx', 'properties',
+        'markdown', 'mdx', 'properties', 'groovy',
       ],
     })
   }
