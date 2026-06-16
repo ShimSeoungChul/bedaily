@@ -76,51 +76,6 @@ public class UserRepository {
 }
 ```
 
-Virtual Thread가 I/O 대기 상태에 들어가면 정상적으로는 캐리어 스레드에서 **unmount**돼 다른 Virtual Thread가 그 자리를 채웁니다. `synchronized` 안에서 블로킹이 발생하면 이 unmount가 일어나지 않고, 캐리어 스레드도 함께 블로킹됩니다.
-
-<svg viewBox="0 0 620 170" style={{width:'100%',maxWidth:'620px',display:'block',margin:'1.5rem auto'}} xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="g" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
-      <path d="M0,0 L0,6 L7,3 z" fill="#15803d"/>
-    </marker>
-    <marker id="r" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
-      <path d="M0,0 L0,6 L7,3 z" fill="#dc2626"/>
-    </marker>
-  </defs>
-  <rect x="0" y="0" width="620" height="76" rx="8" fill="#f0fdf4"/>
-  <text x="10" y="17" fill="#166534" fontSize="11" fontWeight="bold">정상</text>
-  <rect x="10" y="24" width="54" height="24" rx="3" fill="#bbf7d0" stroke="#16a34a" strokeWidth="1.5"/>
-  <text x="37" y="40" textAnchor="middle" fill="#14532d" fontSize="11">VT-A</text>
-  <line x1="64" y1="36" x2="92" y2="36" stroke="#15803d" strokeWidth="1.5" markerEnd="url(#g)"/>
-  <rect x="92" y="24" width="68" height="24" rx="3" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1.5"/>
-  <text x="126" y="40" textAnchor="middle" fill="#1e40af" fontSize="11">I/O 대기</text>
-  <line x1="160" y1="36" x2="200" y2="36" stroke="#15803d" strokeWidth="1.5" markerEnd="url(#g)"/>
-  <text x="180" y="29" textAnchor="middle" fill="#15803d" fontSize="10">unmount</text>
-  <rect x="200" y="24" width="190" height="24" rx="3" fill="#bbf7d0" stroke="#16a34a" strokeWidth="1.5"/>
-  <text x="295" y="40" textAnchor="middle" fill="#14532d" fontSize="11">Carrier Thread: VT-B, VT-C... 처리</text>
-  <text x="10" y="68" fill="#15803d" fontSize="10">캐리어 스레드가 다른 Virtual Thread를 계속 실행 → 처리량 유지</text>
-  <rect x="0" y="90" width="620" height="76" rx="8" fill="#fef2f2"/>
-  <text x="10" y="107" fill="#991b1b" fontSize="11" fontWeight="bold">핀닝 (synchronized + I/O)</text>
-  <rect x="10" y="114" width="108" height="24" rx="3" fill="#fecaca" stroke="#dc2626" strokeWidth="1.5"/>
-  <text x="64" y="130" textAnchor="middle" fill="#7f1d1d" fontSize="11">VT-A + synchronized</text>
-  <line x1="118" y1="126" x2="146" y2="126" stroke="#dc2626" strokeWidth="1.5" markerEnd="url(#r)"/>
-  <rect x="146" y="114" width="68" height="24" rx="3" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1.5"/>
-  <text x="180" y="130" textAnchor="middle" fill="#1e40af" fontSize="11">I/O 대기</text>
-  <line x1="214" y1="126" x2="250" y2="126" stroke="#dc2626" strokeWidth="1.5" strokeDasharray="4,3" markerEnd="url(#r)"/>
-  <text x="232" y="119" textAnchor="middle" fill="#dc2626" fontSize="10">unmount ✗</text>
-  <rect x="250" y="114" width="162" height="24" rx="3" fill="#fecaca" stroke="#dc2626" strokeWidth="1.5"/>
-  <text x="331" y="130" textAnchor="middle" fill="#7f1d1d" fontSize="11">Carrier Thread: 함께 블로킹</text>
-  <text x="10" y="158" fill="#dc2626" fontSize="10">캐리어 스레드 8개가 모두 핀닝되면 → 나머지 VT 전부 대기 → 사실상 hang</text>
-</svg>
-
-캐리어 스레드는 CPU 코어 수만큼만 존재합니다. 핀닝이 쌓이면:
-
-| 핀닝 수 | Carrier Thread (8개 기준) | 결과 |
-|--------|--------------------------|------|
-| 0개 | 자유롭게 순환 | 정상 처리 |
-| 4개 | 절반 점유 | 처리량 50% 감소 |
-| 8개 | 전부 블로킹 | 나머지 VT 전부 대기 → hang |
-
 Java 21에서 `ReentrantLock`으로 우회했던 코드는 Java 25에서 `synchronized`를 그대로 유지해도 됩니다.
 
 ## Structured Concurrency — 병렬 작업을 하나의 단위로 관리하기
