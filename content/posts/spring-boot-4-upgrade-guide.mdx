@@ -35,11 +35,11 @@ Order order = em.find(Order.class, orderId, LockModeType.PESSIMISTIC_WRITE);
 
 EE 11 호환성 때문에 서드파티 라이브러리(특히 JPA 구현체, Validation 관련)는 버전을 꼭 확인하자. Hibernate는 7.1로 올라갔다.
 
-## HTTP Service Clients — 이 논쟁 이제 끝
+## HTTP Service Clients — 드디어 공식 답이 나왔다
 
 Spring에서 외부 API를 호출할 때마다 선택지가 많아서 오히려 불편했다. RestTemplate은 deprecated 예정이라 하고, WebClient는 쓰려면 reactive 스택이 필요하고, OpenFeign은 서드파티라 버전 관리가 따로다.
 
-Boot 4는 HTTP Service Clients 자동 구성으로 이 상황을 정리했다. 인터페이스에 `@HttpExchange` 붙이면 Spring이 구현체를 만들어준다. OpenFeign이 수년간 인기를 끌었던 이유 그 자체를 Spring이 흡수한 것이다.
+Boot 4는 HTTP Service Clients 자동 구성으로 이 상황을 정리했다. 인터페이스에 `@HttpExchange` 붙이면 Spring이 구현체를 만들어준다. OpenFeign이 인기를 끌었던 건 HTTP 호출을 인터페이스 하나로 선언하면 구현체를 프레임워크가 알아서 만들어주는 선언적 방식 덕분이었는데, Spring이 이 패턴을 공식으로 흡수한 것이다.
 
 ```java filename="UserApiClient.java"
 @HttpExchange("https://api.example.com")
@@ -64,7 +64,7 @@ UserApiClient userApiClient(RestClient.Builder builder) {
 }
 ```
 
-`@HttpExchange`는 사실 Spring Framework 6.0부터 있었다. Boot 4에서 달라진 건 auto-configuration이 완성돼 공식 권장 패턴으로 자리 잡았다는 것이다. 스트리밍이나 멀티파트 같은 복잡한 케이스는 여전히 WebClient를 직접 쓰는 게 낫다.
+`@HttpExchange`는 사실 Spring Framework 6.0부터 있었다. Boot 4에서 달라진 건 auto-configuration이 완성돼 공식 권장 패턴으로 자리 잡았다는 것이다. 다만 스트리밍이나 멀티파트 같은 케이스는 여전히 WebClient를 직접 쓰는 게 낫다. `@HttpExchange`의 선언적 인터페이스로는 청크 단위로 흘러오는 응답을 논블로킹으로 소비하거나, 대용량 파일을 메모리에 다 올리지 않고 리액티브 스트림으로 전송하는 세밀한 제어가 어렵기 때문이다.
 
 ## Observability — 설정 세 곳이 하나로
 
