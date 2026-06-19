@@ -1,0 +1,429 @@
+---
+title: "Apache Kafka 구조 완전 정리 — 실무에서 진짜 중요한 것들"
+date: "2026-06-19"
+category: "Backend"
+tags: ["Apache Kafka", "메시지 브로커", "분산 시스템", "이벤트 스트리밍", "KRaft"]
+summary: "Kafka를 단순히 메시지 큐로 이해하면 운영에서 반드시 문제를 겪는다. 분산 Commit Log라는 본질부터 프로듀서, 컨슈머, 복제, 리밸런싱, 신뢰성 보장까지 실무 관점으로 정리한다."
+published: true
+---
+
+## Kafka란 무엇인가
+
+Kafka를 처음 접하면 "메시지 큐"로 이해하기 쉽다. Producer가 메시지를 넣고 Consumer가 꺼내 가니까. 하지만 이 관점으로 Kafka를 쓰면 운영에서 반드시 벽에 부딪힌다.
+
+Kafka는 **분산 Commit Log**다. 메시지를 소비해도 사라지지 않는다. 디스크에 순차적으로 append되고, 보존 정책에 따라 일정 기간 유지된다. Consumer는 로그의 특정 위치(offset)를 기억하고 있을 뿐이다.
+
+이 차이가 실무에서 왜 중요한가? 장애 복구 시 Consumer의 offset만 되돌리면 과거 메시지를 재처리할 수 있다. 같은 토픽을 서로 다른 Consumer Group이 독립적으로 소비할 수도 있다. RabbitMQ처럼 한번 꺼내면 사라지는 구조에서는 불가능한 일이다.
+
+> **실무 포인트**: Kafka는 "꺼내면 사라지는 큐"가 아니라 "위치를 기억하는 로그"다. 이 차이가 장애 복구, 재처리, 다중 소비를 가능하게 한다.
+
+## 핵심 구조
+
+### 브로커, 토픽, 파티션, 오프셋
+
+```
+Cluster
+├── Broker 0
+│   ├── Topic-A Partition 0  (Leader)
+│   └── Topic-B Partition 1  (Follower)
+├── Broker 1
+│   ├── Topic-A Partition 1  (Leader)
+│   └── Topic-B Partition 0  (Follower)
+└── Broker 2
+    ├── Topic-A Partition 2  (Leader)
+    └── Topic-B Partition 2  (Leader)
+```
+
+- **브로커(Broker)**: Kafka 프로세스 하나가 브로커 하나다. 클러스터는 여러 브로커로 구성된다.
+- **토픽(Topic)**: 메시지의 논리적 분류 단위다. `order-events`, `user-signup` 같은 이름을 붙인다.
+- **파티션(Partition)**: 토픽을 물리적으로 나눈 단위다. 각 파티션은 독립된 Commit Log다.
+- **오프셋(Offset)**: 파티션 내에서 각 레코드의 순번이다. 0부터 시작해서 단조 증가한다.
+
+핵심은 **파티션 내에서는 순서가 보장되지만, 파티션 간에는 순서가 보장되지 않는다**는 것이다. 주문 생성 → 결제 완료 → 배송 시작이 순서대로 처리되어야 한다면, 같은 주문 ID를 키로 사용해서 같은 파티션에 들어가도록 해야 한다.
+
+### 로그 세그먼트 구조
+
+파티션 하나는 디스크에서 여러 세그먼트 파일로 나뉜다.
+
+```
+partition-0/
+├── 00000000000000000000.log        # 실제 메시지 데이터
+├── 00000000000000000000.index      # offset → 파일 내 물리 위치 매핑
+├── 00000000000000000000.timeindex  # timestamp → offset 매핑
+├── 00000000000000004096.log
+├── 00000000000000004096.index
+└── 00000000000000004096.timeindex
+```
+
+- `.log`: 실제 레코드가 저장되는 파일이다. 파일명이 해당 세그먼트의 시작 offset이다.
+- `.index`: offset으로 `.log` 파일 내 물리적 위치를 빠르게 찾기 위한 인덱스다.
+- `.timeindex`: 특정 시간 기준으로 offset을 찾을 때 사용된다. 장애 복구 시 "어제 18시 이후 메시지부터 재처리"가 가능한 이유다.
+
+### 보존 정책
+
+Kafka는 메시지를 영원히 저장하지 않는다. 세 가지 보존 정책을 조합할 수 있다.
+
+```properties
+# 시간 기반: 7일이 지난 세그먼트 삭제
+log.retention.hours=168
+
+# 크기 기반: 파티션당 50GB 초과 시 오래된 세그먼트부터 삭제
+log.retention.bytes=53687091200
+
+# Compaction: 같은 키의 최신 값만 유지
+log.cleanup.policy=compact
+```
+
+time과 size는 "오래된 데이터 정리"에 쓰고, compact는 "최신 상태 유지"에 쓴다. 예를 들어 사용자 프로필 변경 이벤트라면 compact가 적합하다. 같은 userId에 대해 마지막 상태만 남기면 되니까.
+
+> **실무 포인트**: `log.retention.hours`를 너무 짧게 잡으면 Consumer 장애 복구 시 재처리할 데이터가 없다. 최소 72시간은 확보하는 것을 권장한다.
+
+## 프로듀서
+
+### acks 설정
+
+프로듀서가 "이 메시지가 잘 저장됐다"고 판단하는 기준이 acks다.
+
+| acks | 동작 | 트레이드오프 |
+|------|------|-------------|
+| `0` | 브로커 응답을 기다리지 않는다 | 최고 처리량, 유실 가능 |
+| `1` | 리더 브로커가 기록하면 응답 | 리더 장애 시 유실 가능 |
+| `all` | ISR 내 모든 브로커가 기록하면 응답 | 가장 안전, 지연 증가 |
+
+### acks=all만으로 안전하지 않은 이유
+
+`acks=all`은 ISR(In-Sync Replicas)에 있는 모든 브로커에 기록된 후 응답한다. 그런데 ISR에 리더 하나만 남아 있으면? `acks=all`이어도 리더 하나에만 쓰고 성공 응답이 온다. 리더가 죽으면 데이터가 유실된다.
+
+안전한 구성은 세 가지를 함께 설정해야 한다.
+
+```properties
+# 프로듀서
+acks=all
+
+# 브로커 (토픽 단위)
+replication.factor=3
+min.insync.replicas=2
+```
+
+`replication.factor=3`이면 리더 1 + 팔로워 2로 총 3개 복제본이 존재한다. `min.insync.replicas=2`이면 최소 2개 브로커에 기록되어야 프로듀서에게 성공 응답을 보낸다. 이 상태에서 브로커 1대가 죽어도 데이터는 안전하다.
+
+### Sticky Partitioner
+
+키가 없는 레코드를 보낼 때, 과거에는 라운드로빈으로 레코드마다 파티션을 바꿨다. 이러면 배치가 잘게 쪼개져서 네트워크 요청이 많아진다.
+
+Sticky Partitioner는 **키가 없는 레코드에만 적용**되며, 하나의 배치가 채워질 때까지 같은 파티션에 계속 보낸다. 배치 효율이 올라가고 지연이 줄어든다. 키가 있는 레코드는 항상 키의 해시값으로 파티션이 결정되므로 Sticky Partitioner와 무관하다.
+
+> **실무 포인트**: 메시지 유실이 허용되지 않는 시스템이라면 `acks=all` 단독이 아니라 `replication.factor=3` + `min.insync.replicas=2` 조합이 최소 조건이다.
+
+## 복제 구조 (Replication)
+
+### 리더와 팔로워
+
+모든 읽기/쓰기 요청은 리더 파티션이 처리한다. 팔로워는 리더의 로그를 지속적으로 복제(fetch)한다. 리더가 죽으면 ISR 내의 팔로워가 새 리더로 승격된다.
+
+```
+Producer ──write──▶ Broker 0 [Leader P0]
+                         │
+                    fetch │ fetch
+                         ▼
+              Broker 1 [Follower P0]
+              Broker 2 [Follower P0]
+
+Consumer ──read──▶ Broker 0 [Leader P0]
+```
+
+참고로 Kafka 2.4부터 Follower Fetching(`replica.selector.class`)을 설정하면 Consumer가 가까운 팔로워에서 읽을 수 있다. 이 기능은 성능 향상이 목적이 아니라, **cross-AZ 네트워크 비용 절감**이 주된 목적이다. 같은 AZ의 팔로워에서 읽으면 AZ 간 데이터 전송 비용을 줄일 수 있다.
+
+### ISR (In-Sync Replicas)
+
+ISR은 리더와 동기화 상태가 유지되고 있는 팔로워 집합이다. 팔로워가 ISR에서 빠지는 조건은 다음과 같다.
+
+```properties
+# 팔로워가 이 시간 내에 fetch 요청을 보내지 않으면 ISR에서 제거
+replica.lag.time.max.ms=30000
+```
+
+ISR에서 빠지는 실무적 원인:
+
+- 팔로워 브로커의 디스크 I/O 병목
+- 네트워크 지연이나 일시적 단절
+- 팔로워의 GC pause가 `replica.lag.time.max.ms`를 초과
+
+ISR이 줄어들면 `min.insync.replicas` 조건을 못 채워 프로듀서가 쓰기 실패(`NotEnoughReplicasException`)를 받을 수 있다. 운영 환경에서는 ISR 크기를 반드시 모니터링해야 한다.
+
+> **실무 포인트**: ISR 축소 알림은 "곧 장애가 올 수 있다"는 선행 지표다. 프로듀서 에러가 터지기 전에 대응할 수 있는 유일한 타이밍이다.
+
+## 컨슈머와 컨슈머 그룹
+
+### 파티션 수 = 최대 병렬 소비 단위
+
+하나의 파티션은 같은 Consumer Group 내에서 **단 하나의 Consumer만** 읽을 수 있다.
+
+```
+Topic: order-events (3 partitions)
+
+Consumer Group: order-service
+├── Consumer A ← Partition 0
+├── Consumer B ← Partition 1
+└── Consumer C ← Partition 2
+
+Consumer D를 추가해도 놀게 된다 (할당받을 파티션 없음)
+```
+
+파티션 3개면 같은 그룹 내 최대 병렬 소비자도 3개다. Consumer를 4개로 늘려도 1개는 idle 상태가 된다. 반대로, 서로 다른 Consumer Group은 같은 파티션을 독립적으로 소비할 수 있다.
+
+### 오프셋 커밋 방식
+
+Consumer가 "여기까지 읽었다"는 정보를 기록하는 것이 offset commit이다. 이 커밋 위치가 Consumer 재시작 시 어디서부터 읽을지를 결정한다.
+
+| 방식 | 특성 | 위험 |
+|------|------|------|
+| `enable.auto.commit=true` | 주기적으로 자동 커밋 (`auto.commit.interval.ms`) | 처리 완료 전에 커밋되면 메시지 유실 |
+| `commitSync()` | 처리 완료 후 동기 커밋 | 커밋 실패 시 블로킹, 처리량 저하 |
+| `commitAsync()` | 처리 완료 후 비동기 커밋 | 커밋 실패 시 재시도 없음, 중복 소비 가능 |
+
+실무에서 가장 많이 쓰는 패턴은 **auto commit을 끄고 처리 완료 후 `commitSync()`를 호출**하는 것이다. 처리량이 중요한 경우에는 `commitAsync()`를 기본으로 쓰되, Consumer 종료 시점에 `commitSync()`를 한 번 호출하는 하이브리드 방식도 있다.
+
+### __consumer_offsets 토픽
+
+Consumer가 커밋한 offset은 어디에 저장될까? Kafka 내부 토픽인 `__consumer_offsets`에 저장된다. 이 토픽 자체도 파티션이 나뉘어 있고(기본 50개), Consumer Group ID를 키로 해서 해당 그룹의 offset 정보를 보관한다.
+
+별도의 외부 저장소 없이 Kafka 자체가 offset을 관리하므로, Kafka 클러스터만 정상이면 Consumer의 읽기 위치 정보도 안전하다.
+
+> **실무 포인트**: auto commit은 편하지만 "처리는 실패했는데 offset만 전진"하는 유실 시나리오를 만든다. 메시지 유실이 치명적인 도메인이라면 수동 커밋이 기본이다.
+
+## 컨슈머 리밸런싱
+
+Consumer Group에 Consumer가 추가/제거되거나, 토픽의 파티션 수가 바뀌면 파티션-Consumer 매핑이 재조정된다. 이것이 리밸런싱이다.
+
+### Eager Rebalancing (Stop-the-World)
+
+기존 방식인 Eager Rebalancing은 **모든 Consumer가 파티션 할당을 반납한 뒤** 다시 분배한다.
+
+```
+[리밸런싱 발생]
+Consumer A: Partition 0, 1 ──반납──▶ 전부 해제
+Consumer B: Partition 2    ──반납──▶ 전부 해제
+
+[재할당]
+Consumer A: Partition 0 ◀── 새 할당
+Consumer B: Partition 1 ◀── 새 할당
+Consumer C: Partition 2 ◀── 새 할당 (신규 추가)
+```
+
+문제는 리밸런싱 동안 **모든 Consumer가 메시지 소비를 멈춘다**는 것이다. 이 stop-the-world는 Eager 방식에서만 발생한다.
+
+### Cooperative Sticky Rebalancing
+
+Kafka 2.4부터 도입된 Cooperative Sticky Rebalancing은 **변경이 필요한 파티션만 점진적으로 이동**한다.
+
+```
+[리밸런싱 발생]
+Consumer A: Partition 0, 1 ──유지──▶ Partition 0 (유지)
+Consumer B: Partition 2    ──유지──▶ Partition 2 (유지)
+
+[Partition 1만 이동]
+Consumer A: Partition 0    (계속 소비 중)
+Consumer B: Partition 2    (계속 소비 중)
+Consumer C: Partition 1 ◀── Partition 1만 넘겨받음
+```
+
+이동 대상이 아닌 파티션의 Consumer는 소비를 계속한다. Spring Kafka에서는 기본 설정이 `CooperativeStickyAssignor`다.
+
+### 리밸런싱이 반복되는 원인
+
+실무에서 리밸런싱이 끊임없이 반복되는 "리밸런싱 폭풍"을 겪는 경우가 있다. 주요 원인은 다음과 같다.
+
+```properties
+# Consumer가 이 시간 안에 heartbeat를 보내지 않으면 죽은 것으로 판단
+session.timeout.ms=45000
+
+# heartbeat 전송 주기 (session.timeout.ms의 1/3 이하 권장)
+heartbeat.interval.ms=3000
+
+# poll() 호출 간격이 이 값을 초과하면 그룹에서 제외
+max.poll.interval.ms=300000
+```
+
+- **GC pause**: Full GC가 `session.timeout.ms`를 초과하면 브로커가 Consumer를 죽은 것으로 판단한다.
+- **처리 지연**: 한 번의 `poll()`로 가져온 레코드를 `max.poll.interval.ms` 안에 처리하지 못하면 그룹에서 강제 제거된다.
+- **네트워크 불안정**: heartbeat가 도달하지 못하면 같은 결과다.
+
+대응 방법은 `max.poll.records`를 줄여서 한 번에 처리할 양을 줄이거나, `max.poll.interval.ms`를 늘리는 것이다. 근본적으로는 Consumer의 처리 로직 자체를 개선해야 한다.
+
+> **실무 포인트**: 리밸런싱 반복의 80%는 Consumer 처리 지연이 원인이다. `max.poll.records`를 먼저 줄여보는 것이 가장 빠른 대응이다.
+
+## 신뢰성 보장 수준
+
+메시지 시스템에서 전달 보장은 세 단계로 나뉜다.
+
+| 수준 | 의미 | 발생 조건 |
+|------|------|----------|
+| At-most-once | 최대 한 번. 유실 가능, 중복 없음 | offset을 먼저 커밋하고 처리 |
+| At-least-once | 최소 한 번. 유실 없음, 중복 가능 | 처리 후 offset 커밋 |
+| Exactly-once | 정확히 한 번. 유실 없음, 중복 없음 | EOS 구성 필요 |
+
+대부분의 시스템은 at-least-once로 설계하고, Consumer 쪽에서 멱등성(idempotency)을 보장하는 것이 현실적인 선택이다.
+
+### Idempotent Producer
+
+```properties
+enable.idempotence=true
+```
+
+프로듀서가 네트워크 오류로 재시도할 때, 같은 메시지가 브로커에 중복 기록되는 것을 방지한다. 프로듀서가 각 메시지에 시퀀스 번호를 붙이고, 브로커가 이를 검증해서 중복을 걸러낸다.
+
+단, idempotent producer는 **단일 프로듀서 세션 내, 단일 파티션에 대한 중복 방지**만 보장한다. 여러 토픽에 걸친 트랜잭션이나, 프로듀서 재시작 후의 중복까지는 막지 못한다.
+
+### Exactly-Once Semantics (EOS) 완전 구성
+
+진정한 exactly-once를 위해서는 세 가지를 함께 설정해야 한다.
+
+```properties
+# 프로듀서
+enable.idempotence=true
+transactional.id=my-transactional-producer
+
+# 컨슈머
+isolation.level=read_committed
+```
+
+- `enable.idempotence=true`: 파티션 내 중복 방지
+- `transactional.id`: 프로듀서가 여러 파티션에 원자적으로 쓸 수 있게 한다. 프로듀서 재시작 후에도 미완료 트랜잭션을 정리(abort)한다.
+- `isolation.level=read_committed`: Consumer가 커밋된 트랜잭션의 메시지만 읽는다. 미완료 트랜잭션의 메시지는 보이지 않는다.
+
+EOS는 주로 Kafka Streams의 consume-transform-produce 패턴에서 사용된다. 일반적인 Consumer-Producer 조합에서 EOS를 적용하면 처리량이 크게 떨어지므로, 정말 필요한 경우에만 사용한다.
+
+> **실무 포인트**: 대부분의 서비스는 at-least-once + Consumer 멱등성 처리가 가장 현실적인 선택이다. EOS는 비용이 크므로 금융 거래 등 정확히 한 번이 비즈니스 요구사항인 경우에 한정한다.
+
+## Consumer Lag
+
+### Lag이란
+
+Consumer Lag은 **프로듀서가 마지막으로 쓴 offset과 Consumer가 마지막으로 커밋한 offset의 차이**다.
+
+```
+Partition 0:
+Producer offset (LOG-END-OFFSET):     150,000
+Consumer committed offset:            148,500
+─────────────────────────────────────────────
+Consumer Lag:                           1,500
+```
+
+Lag이 0이면 Consumer가 실시간으로 따라가고 있다는 뜻이다. Lag이 지속적으로 증가하면 Consumer가 프로듀서의 쓰기 속도를 따라가지 못하고 있다는 신호다.
+
+### Lag이 증가하는 원인
+
+- **Consumer 처리 로직이 느림**: 외부 API 호출, 무거운 DB 쿼리 등
+- **Consumer 인스턴스 수 부족**: 파티션 수 대비 Consumer가 적음
+- **리밸런싱 반복**: 리밸런싱 동안 소비가 멈추면서 Lag 누적
+- **프로듀서 트래픽 급증**: 이벤트 세일, 배치 작업 등으로 갑자기 유입량이 증가
+
+### 왜 Lag 모니터링이 필수인가
+
+Lag은 시스템의 "처리 여유분"을 실시간으로 보여주는 지표다. Lag이 증가하면:
+
+- 사용자에게 보이는 데이터가 지연된다 (실시간 대시보드, 알림 등)
+- 보존 정책에 의해 Consumer가 아직 읽지 못한 메시지가 삭제될 수 있다
+- Consumer가 재시작하면 밀린 메시지를 한꺼번에 처리하면서 다운스트림에 부하를 준다
+
+Burrow, Kafka Exporter + Prometheus + Grafana 같은 도구로 Lag을 파티션 단위로 모니터링하고, 임계값 초과 시 알림을 설정해야 한다.
+
+> **실무 포인트**: Consumer Lag은 Kafka 운영의 가장 중요한 메트릭이다. Lag 알림 없이 Kafka를 운영하는 것은 속도계 없이 고속도로를 달리는 것과 같다.
+
+## 파티션 수 설계
+
+### 늘릴 수는 있지만
+
+파티션 수는 운영 중에 늘릴 수 있다. 하지만 **줄일 수는 없다**. 그리고 키 기반 파티셔닝을 사용하고 있다면, 파티션 수를 늘리는 순간 키와 파티션의 매핑이 달라진다.
+
+```
+# 파티션 3개일 때
+hash("order-123") % 3 = 1  → Partition 1
+
+# 파티션 5개로 늘린 후
+hash("order-123") % 5 = 3  → Partition 3
+```
+
+같은 키의 메시지가 다른 파티션으로 가면, 해당 키의 순서 보장이 깨진다. 기존 데이터와 새 데이터가 다른 파티션에 있게 되므로, compact 토픽에서는 상태 정합성 문제도 생길 수 있다.
+
+### 파티션 수 증가의 장단점
+
+**장점**:
+- 병렬 소비 단위가 늘어나 처리량이 증가한다
+- Consumer를 더 많이 투입할 수 있다
+
+**단점**:
+- 브로커의 파일 디스크립터 사용량이 증가한다 (파티션당 세그먼트 파일 3개)
+- 리더 선출 시간이 늘어난다 (브로커 장애 시 재선출 대상 파티션 수 증가)
+- 키 기반 파티셔닝 사용 시 기존 매핑이 깨진다
+- end-to-end 지연이 늘어날 수 있다 (복제 부담 증가)
+
+> **실무 포인트**: 파티션 수는 처음에 예상 최대 처리량 기준으로 넉넉하게 잡는다. 키 기반 파티셔닝을 쓰고 있다면 운영 중 파티션 추가는 매우 신중해야 한다.
+
+## 버전별 변화: ZooKeeper → KRaft
+
+### ZooKeeper 모드의 구조와 한계
+
+Kafka는 오랫동안 클러스터 메타데이터 관리를 ZooKeeper에 의존했다.
+
+```
+┌─────────────┐     ┌─────────────┐
+│  ZooKeeper  │◀───▶│  ZooKeeper  │
+│   Node 1    │     │   Node 2    │
+└──────┬──────┘     └──────┬──────┘
+       │                   │
+       ▼                   ▼
+┌─────────────┐     ┌─────────────┐
+│  Kafka      │     │  Kafka      │
+│  Broker 1   │     │  Broker 2   │
+└─────────────┘     └─────────────┘
+```
+
+- 브로커 등록, 컨트롤러 선출, 토픽/파티션 메타데이터를 ZooKeeper가 보관
+- 컨트롤러 브로커가 ZooKeeper를 watch하면서 변경사항을 다른 브로커에 전파
+
+이 구조의 한계:
+
+- **운영 복잡도**: Kafka와 별도로 ZooKeeper 클러스터를 관리해야 한다
+- **메타데이터 전파 지연**: 컨트롤러가 ZooKeeper에서 변경을 감지한 뒤 각 브로커에 순차 전파하므로 파티션 수가 많으면 느리다
+- **확장성 병목**: 수십만 개 파티션 수준에서 ZooKeeper가 병목이 된다
+
+### KRaft 모드: Raft 합의 기반 메타데이터 관리
+
+KRaft(Kafka Raft)는 ZooKeeper 없이 Kafka 자체적으로 메타데이터를 관리하는 방식이다.
+
+```
+┌──────────────────────────────────────┐
+│           KRaft Controller Quorum    │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐
+│  │Controller│ │Controller│ │Controller│
+│  │ (Active) │ │(Follower)│ │(Follower)│
+│  └──────────┘ └──────────┘ └──────────┘
+└──────────────────────────────────────┘
+         │            │            │
+         ▼            ▼            ▼
+   ┌──────────┐ ┌──────────┐ ┌──────────┐
+   │ Broker 1 │ │ Broker 2 │ │ Broker 3 │
+   └──────────┘ └──────────┘ └──────────┘
+```
+
+Controller 노드들이 Raft 프로토콜로 합의를 이루고, 메타데이터 변경사항을 이벤트 로그로 관리한다. 각 브로커는 이 로그를 구독해서 로컬에 메타데이터를 유지한다.
+
+### 홀수 구성 권장 이유
+
+KRaft Controller는 과반수(quorum)가 살아 있어야 동작한다.
+
+| 컨트롤러 수 | 과반수 | 허용 장애 수 |
+|------------|--------|------------|
+| 3 | 2 | 1대 |
+| 4 | 3 | 1대 |
+| 5 | 3 | 2대 |
+
+3대와 4대의 허용 장애 수가 동일하다. 4대 구성이 동작하지 않는 것은 아니지만, 장비를 하나 더 쓰면서 장애 허용성은 올라가지 않는다. 리소스 대비 효율이 낮으므로 **홀수 구성(3대 또는 5대)을 권장**한다.
+
+### Kafka 4.0에서 ZooKeeper 완전 제거
+
+Kafka 3.3에서 KRaft가 production-ready로 선언됐고, 3.5부터 ZooKeeper 모드가 deprecated됐다. **Kafka 4.0에서 ZooKeeper 관련 코드가 완전히 제거**됐다. 새로 구축하는 클러스터는 반드시 KRaft 모드로 시작해야 하고, 기존 ZooKeeper 기반 클러스터는 Kafka 4.0 이전에 KRaft로 마이그레이션을 완료해야 한다.
+
+> **실무 포인트**: 아직 ZooKeeper 모드를 쓰고 있다면 KRaft 마이그레이션은 "하면 좋은 것"이 아니라 "반드시 해야 하는 것"이다. Kafka 4.0에서 ZooKeeper 지원이 완전히 사라졌다.
