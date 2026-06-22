@@ -1,0 +1,297 @@
+---
+title: "Elasticsearch 7 아키텍처 — 클러스터부터 Lucene 내부까지"
+date: "2026-06-23"
+category: "Backend"
+tags: ["Elasticsearch", "Elasticsearch 7", "분산 검색", "Lucene", "아키텍처"]
+summary: "Elasticsearch 7은 Lucene 위에 세운 분산 검색·분석 엔진입니다. 클러스터 토폴로지부터 쓰기/검색 경로, 역색인, 데이터 티어·ILM, 실무 설정까지 다이어그램과 함께 정리합니다."
+published: true
+---
+
+## 개요
+
+Elasticsearch는 **Apache Lucene 위에 세운 분산 검색·분석 엔진**이다. 대용량 데이터를 잘게 나눠 여러 서버에 분산 저장하고, 전문 검색과 집계를 거의 실시간으로 돌려주는 것이 핵심 역할이다.
+
+- **하는 일** — JSON 문서를 색인해 두고 "이 단어가 든 문서 찾기"·"조건별 통계 내기"를 대량·고속으로 수행. 역색인 덕에 RDB의 `LIKE` 스캔과 비교가 안 될 만큼 빠르다.
+- **주 무대** — 검색 기능, 로그·관측성(Elastic Stack), 분석 대시보드처럼 읽기·검색·집계가 무거운 워크로드.
+- **아닌 것** — 강한 트랜잭션·조인 중심의 주 저장소가 아니다. 보통 RDB가 원본(source of truth)이고, ES는 그 데이터를 검색·분석용으로 비정규화해 둔 보조 계층이다.
+- **설계 철학** — 수평 확장(샤드로 분산)·고가용성(복제)·near real-time. 강한 일관성보다 확장성과 검색 속도를 우선한다.
+
+관계형 DB에 익숙하다면 다음 대응이 출발점으로 좋다(느슨한 비유다).
+
+| 관계형 DB | Elasticsearch | 비고 |
+|---|---|---|
+| Database | Index | 데이터 묶음 단위 |
+| Table | Index / 매핑 | ES7부터 타입 없이 인덱스 = 한 종류 |
+| Row | Document (JSON) | 저장·검색의 기본 단위 |
+| Column | Field | 매핑으로 타입 정의 |
+| Index(색인) | Inverted Index | 이름은 같지만 의미가 다름 — 단어→문서 역추적 |
+
+## 클러스터 토폴로지
+
+하나의 클러스터는 여러 노드로 구성되고, 인덱스는 샤드 단위로 쪼개져 노드들에 흩어져 저장된다.
+
+```text filename="클러스터 토폴로지"
+클라이언트 ──HTTP :9200──▶  [ Cluster: search-cluster ]
+
+   Node-1  ★ master + data (선출됨)
+      P0(primary)   R1(replica)
+   Node-2  data
+      P1(primary)
+   Node-3  data
+      R0(replica)
+
+   · 노드 간 통신 = transport :9300
+   · 외부 REST     = :9200
+   · primary = 쓰기 원본,  replica = 사본(반드시 다른 노드)
+```
+
+- **Cluster** — `cluster.name`이 같은 노드들의 집합. 이름이 다르면 절대 한 클러스터로 묶이지 않는다.
+- **Node** — ES 프로세스 1개 = 노드 1개. 운영에선 보통 서버 1대 = 노드 1개로 운영한다(JVM·페이지캐시 경합 회피).
+- **두 개의 포트** — 외부 REST는 `9200`(HTTP), 노드 간 내부 통신은 `9300`(transport).
+- **선출된 마스터** — 클러스터 상태(cluster state: 매핑·샤드 위치·노드 목록)를 관리한다. 데이터 라우팅 자체엔 끼지 않는다.
+- **cluster state 전파** — 마스터가 상태 변경을 모든 노드에 publish → 노드들이 같은 메타데이터를 공유한다. 매핑 변경·샤드 이동 같은 작업이 여기를 거친다.
+- **멀티 클러스터** — `Cross-Cluster Search(CCS)`로 여러 클러스터를 한 번에 검색하고, `Cross-Cluster Replication(CCR)`으로 인덱스를 원격 클러스터에 복제한다(DR·지역 분산).
+
+## 논리 구조와 물리 구조
+
+인덱스 → 샤드 → Lucene 세그먼트 → 문서로 내려가는 계층이다. 샤드가 논리(ES)와 물리(Lucene)를 잇는 경계다.
+
+```text filename="논리 ↔ 물리 계층"
+Index: products   (논리 단위 — 매핑·세팅 보유)
+   │
+   ├─ Shard P0  (= Lucene index 1개)
+   │     ├ segment _0   [ doc doc doc doc ]   (불변)
+   │     ├ segment _1   [ doc doc ]           (불변)
+   │     └ translog (WAL) — 아직 flush 안 된 변경 보호
+   │
+   └─ Shard R0  (P0의 복제본, 다른 노드에 위치)
+         내용은 P0와 동일 — 가용성 + 읽기 분산
+
+   계층:  Index ⊃ Shard(=Lucene index) ⊃ Segment(불변) ⊃ Document
+```
+
+- **Index** — 매핑/세팅을 가진 논리 단위. ES7부터 **매핑 타입이 제거**되어 인덱스당 타입은 `_doc` 하나뿐이다.
+- **Shard** — 인덱스를 나눈 조각이자 **독립된 Lucene 인덱스 1개**. 분산·병렬 처리의 최소 단위다.
+- **Segment** — Lucene의 불변(immutable) 파일 묶음. 한 번 쓰이면 수정 불가, 삭제는 "삭제 표시" 후 merge 때 정리한다.
+- **primary vs replica** — primary는 쓰기 원본, replica는 사본. ES7 기본값은 **primary 1 · replica 1**(ES6의 primary 5에서 변경됨).
+- **샤드 수는 생성 후 불변** — primary 개수는 인덱스 생성 시 고정된다. 바꾸려면 reindex 또는 split/shrink API가 필요하다.
+
+## 노드 역할과 클러스터 코디네이션
+
+노드는 역할(role)로 책임이 갈린다. ES7은 Zen Discovery를 버리고 새 합의 기반 코디네이션을 도입했다.
+
+```text filename="노드 역할과 코디네이션"
+노드 역할 (ES7)
+   master-eligible  →  클러스터 상태 관리·샤드 할당·노드 추적 (보통 3개)
+   data             →  샤드 저장·CRUD·검색·집계 실행
+   ingest           →  인덱싱 전 pipeline 전처리
+   coordinating     →  요청 분배·결과 병합 (모든 노드의 기본 능력)
+
+ES7 새 코디네이션 (Zen Discovery 대체)
+   discovery.seed_hosts          접속 시도할 노드 후보 (구 unicast.hosts)
+   cluster.initial_master_nodes  최초 1회 부트스트랩 전용 (재시작 시 사용 금지)
+   voting configuration          과반 투표로 마스터 선출
+                                 → minimum_master_nodes 수동 설정 제거
+```
+
+- **master-eligible** — 그중 하나가 마스터로 선출된다. 안정성을 위해 보통 **3개(홀수)**를 두어 1대 장애에도 과반을 유지한다.
+- **data** — 실제 샤드를 들고 무거운 I/O·CPU를 담당한다. 7.9+에서 `data_hot/warm/cold/content` 티어로 세분화할 수 있다.
+- **coordinating** — 별도 role이 아니라 모든 노드의 기본 능력이다. 다른 role을 다 끄면 "전용 coordinating"(LB 역할)이 된다.
+- **ES7 핵심 변화** — 안전한 합의 서브시스템으로 교체되면서 `discovery.zen.minimum_master_nodes` 같은 split-brain 수동 설정이 사라졌다. 합의 알고리즘이 split-brain을 자동으로 막는다.
+- **초기 부트스트랩 함정** — `cluster.initial_master_nodes`는 최초 1회만 쓴다. 운영 중인 클러스터에 남겨두면 위험하다. role 설정은 7.9+에서 `node.roles: [master, data]` 배열로 통합됐다.
+
+## 샤드 라우팅 · 복제 · 장애 복구
+
+문서가 어느 샤드로 갈지는 해시로 결정된다. 그래서 primary 샤드 수는 나중에 못 바꾼다.
+
+```text filename="라우팅과 복제"
+문서 _id=42  ──index──▶  shard = hash(_routing) % primary 수
+                              │  (_routing 기본값 = _id)
+                              ▼
+                         P1 (primary)   먼저 기록
+                              │  병렬 복제 (동기)
+                              ▼
+                         R1 (replica, 다른 노드)
+
+   · in-sync 복제본 모두 기록돼야 클라이언트에 ok 응답
+   · primary 노드 다운 → 마스터가 replica를 primary로 즉시 승격 + 새 replica 재생성
+```
+
+- **라우팅 공식** — `shard = hash(_routing) % primary 수`. 기본 `_routing`은 `_id`다. 커스텀 라우팅으로 특정 샤드에 몰 수도 있다.
+- **쓰기는 primary 먼저** → in-sync replica로 병렬 복제 → 모두 성공해야 클라이언트에 응답한다(기본 일관성).
+- **읽기는 분산** — primary/replica 아무 사본에서나 가능하다. ES7 기본 **adaptive replica selection**이 응답 빠른 사본을 우선 선택한다.
+- **replica는 노드 분리 필수** — primary와 같은 노드엔 못 올라간다(같이 죽으면 의미가 없으니).
+- **replica 수는 변경 가능** — primary 수와 달리 `number_of_replicas`는 운영 중에도 동적으로 바꿀 수 있다.
+
+<details>
+<summary>복제 내부 — 시퀀스 번호와 체크포인트 기반 복구</summary>
+
+- **seq_no · primary_term** — 모든 쓰기 연산에 시퀀스 번호와 primary 임기 번호를 부여한다. 복제본 간 순서 일관성을 보장하고, 동시성 제어(`if_seq_no` 옵티미스틱 락)에도 쓰인다.
+- **체크포인트 기반 복구** — 각 샤드의 local/global checkpoint로 "어디까지 복제됐는가"를 추적한다. 노드 재합류 시 전체를 복사하는 대신 빠진 연산만 재생하는 operation-based recovery가 가능하다.
+
+</details>
+
+## 쓰기 경로: refresh · translog · flush · merge
+
+"방금 색인했는데 검색이 안 돼요"의 99%는 refresh 타이밍 문제다. 이 흐름을 알면 거의 다 설명된다.
+
+```text filename="쓰기 경로"
+1. 인메모리 버퍼  +  translog(디스크 WAL)        ← 아직 검색 불가
+        │  refresh (기본 1s)
+        ▼
+2. 세그먼트 생성 (OS 파일캐시 상)                 ★ 이때부터 검색 가능 (내구성 X)
+        │  flush (주기적)
+        ▼
+3. 디스크 fsync → 세그먼트 영속화, translog 비움   ← 내구성 확보 (내구성 O)
+
+4. 백그라운드 merge:
+   작은 세그먼트 [s][s][s]  →  큰 세그먼트 [ big ]   (+ 삭제 doc 정리)
+```
+
+- **refresh ≠ flush** — refresh는 "검색 가능"하게 만드는 것(기본 1초 주기), flush는 "디스크에 영구 저장"하는 것이다. 둘은 다른 일이다.
+- **near real-time** — 색인 직후 바로 검색이 안 되는 이유가 이 1초다. 급하면 `?refresh=wait_for`, 색인 폭주 땐 `refresh_interval`을 `30s`나 `-1`로 늘려 처리량을 확보한다.
+- **translog가 내구성 담당** — flush 전에 죽어도 translog 재생으로 복구한다. `index.translog.durability` 기본값은 `request`(매 요청 fsync)이고, `async`로 바꾸면 빠르지만 유실 위험이 있다.
+- **세그먼트는 불변** — update는 "기존 doc 삭제표시 + 새 doc 추가"다. 삭제분은 merge 때 실제 정리된다.
+- **merge 비용** — 작은 세그먼트가 많으면 검색이 느려진다. 색인이 끝난 읽기 전용 인덱스엔 `_forcemerge`로 세그먼트 수를 줄이면 검색이 빨라진다(운영 중 인덱스엔 금물).
+
+## 검색 경로: Query → Fetch (scatter-gather)
+
+검색은 2단계다. 먼저 모든 샤드에서 "누가 상위인가"만 모으고(Query), 그다음 진짜 문서를 가져온다(Fetch).
+
+```text filename="검색 경로"
+클라이언트 (size:10)
+   │
+   ▼
+coordinating ──Query 단계──▶  모든 샤드 (0, 1, 2)
+   │                          각 샤드: 상위 _id + score 만 반환
+   │  ◀───────────────────────
+   │  전역 정렬 + size 자르기
+   │
+   └─Fetch 단계──▶ 확정된 상위 10건의 _source 본문만 해당 샤드에서 회수
+```
+
+- **2단계인 이유** — 모든 샤드가 처음부터 본문을 다 보내면 네트워크 낭비다. 그래서 1차는 식별자+점수만, 2차에서 진짜 필요한 것만 가져온다.
+- **deep paging 함정** — `from:10000 size:10`이면 각 샤드가 10010건씩 정렬해 보낸다. 깊은 페이징엔 `search_after`나 `scroll`(또는 7.10+ PIT)을 쓴다.
+- **집계(aggregation)** — 검색과 별개 경로로 각 샤드가 부분 집계 → coordinating이 합산한다. `doc_values`(디스크 컬럼 저장)를 사용해 빠르다.
+- **fielddata 주의** — `text` 필드의 정렬·집계는 힙을 통째로 먹는 fielddata가 필요하다 → 보통 `keyword` 서브필드로 처리한다.
+- **_source vs doc_values** — 본문 표시는 `_source`(JSON 원문), 정렬·집계는 `doc_values`다. 둘은 다른 저장 구조다.
+- **스코어링은 BM25** — ES7 기본 유사도는 `BM25`(TF-IDF 개선판)다. term 빈도·문서 길이·역문서빈도로 관련도 점수를 계산한다. `filter` 컨텍스트는 점수 계산을 건너뛰어 캐시되고 빠르다.
+
+## 역색인(Inverted Index) — 빠른 검색의 핵심
+
+RDB가 행을 훑는다면, ES는 "단어 → 문서 목록" 사전을 미리 만들어 둔다. 이게 전문 검색이 빠른 이유다.
+
+```text filename="역색인"
+원본 문서                            역색인 (term → posting list)
+  doc1: "빠른 갈색 여우"               빠른 → doc1, doc3
+  doc2: "갈색 개"           analyzer   갈색 → doc1, doc2
+  doc3: "빠른 개"           ───────▶   여우 → doc1
+                                      개   → doc2, doc3
+
+  "갈색" 검색 → posting list 즉시 조회 → doc1, doc2
+  term은 정렬 저장 → 이진탐색으로 단어 위치 즉시 점프
+```
+
+- **analyzer** — 색인·검색 시 텍스트를 term으로 변환한다. 구성은 `char filter`(전처리) → `tokenizer`(토큰 분리) → `token filter`(소문자화·불용어·동의어 등) 순서다. 한국어는 `nori` 플러그인을 많이 쓴다.
+- **색인 vs 검색 analyzer 분리** — 색인 때와 검색 때 다른 analyzer를 쓸 수 있다(예: 색인엔 동의어 확장, 검색엔 미적용). 불일치하면 매칭이 안 되니 주의한다.
+- **text vs keyword** — `text`는 analyzer로 쪼개 전문 검색용, `keyword`는 통째로 저장해 정확 일치·정렬·집계용이다. 같은 필드를 둘 다 쓰려면 multi-field 매핑을 쓴다.
+- **세그먼트마다 역색인** — 역색인은 세그먼트 단위로 존재한다. 그래서 세그먼트가 많으면 검색 시 여러 역색인을 다 훑어야 한다(merge가 중요한 이유).
+
+## 데이터 티어 & ILM 수명주기
+
+시계열 데이터는 시간이 지나며 가치가 떨어진다. ES7은 데이터를 단계별로 더 싼 하드웨어로 옮기고 결국 지운다.
+
+```text filename="데이터 티어와 ILM"
+시간 경과 → 데이터 가치 하락 → 더 싼 자원으로 이동
+
+  Hot ───▶ Warm ───▶ Cold ───▶ Frozen ───▶ Delete
+  SSD      읽기전용    드문검색    스냅샷마운트   보존만료
+  쓰기+    shrink·     replica↓   (7.12+)      자동삭제
+  잦은검색  forcemerge
+
+  rollover : 크기·문서수·기간 도달 시 새 인덱스로 전환, alias 승계
+  ILM 정책이 위 단계 전환을 자동 수행
+```
+
+- **데이터 티어** — 7.9+에서 노드 role을 `data_hot / data_warm / data_cold / data_content`로 구분한다. ILM이 단계에 맞는 티어로 샤드를 옮긴다.
+- **rollover** — 인덱스가 정해진 크기·문서수·기간에 도달하면 새 인덱스로 전환하고 alias를 넘긴다 → 인덱스가 무한정 커지는 것을 방지한다.
+- **단계별 최적화** — Warm 전환 시 `shrink`(샤드 수 축소)·`forcemerge`(세그먼트 병합)로 자원을 절약하고, Cold에서 replica를 줄여 저장 비용을 낮춘다.
+- **적용 대상** — 로그·메트릭·이벤트처럼 시간순으로 쌓이고 오래된 데이터의 가치가 떨어지는 경우에 특히 유효하다.
+
+## 실무에서 빠지면 안 되는 설정
+
+아키텍처를 이해했다면 운영 설정은 그 위에 얹힌다. 그룹별로 접어 둔다.
+
+<details>
+<summary>메모리 · JVM</summary>
+
+- **힙은 물리 RAM의 50%** — 나머지 절반은 Lucene이 OS 페이지 캐시로 써야 검색이 빠르다. 힙을 키운다고 빨라지지 않는다.
+- **힙 32GB 미만 유지** — 그 위로 가면 JVM 압축 OOP가 깨져 오히려 손해다. 보통 `26~30GB` 이하로 설정한다(`Xms = Xmx` 동일하게).
+- **스왑 비활성화** — `bootstrap.memory_lock: true`로 힙을 메모리에 고정한다. GC 중 스왑되면 노드가 응답 불능에 빠진다.
+
+</details>
+
+<details>
+<summary>샤드 사이징</summary>
+
+- **샤드 1개 = 10~50GB** 권장. 너무 작으면 오버헤드, 너무 크면 복구·재배치가 느리다.
+- **노드당 샤드 수 절제** — 힙 1GB당 샤드 20개 이하가 경험칙이다. `cluster.max_shards_per_node` 기본 1000(소프트 한계).
+- **시계열은 시간 기반 인덱스 + ILM** — 로그·이벤트는 `logs-2026.06`처럼 분할 후 ILM으로 rollover·삭제를 자동화한다.
+- **over-sharding 주의** — ES7 기본이 primary 1이라, 6.x에서 올린 습관(5개)대로 잡으면 작은 인덱스가 과분할된다.
+
+</details>
+
+<details>
+<summary>인덱싱 성능</summary>
+
+- **Bulk API 필수** — 단건 색인 대신 `_bulk`로 묶음 전송한다. 배치 크기는 `5~15MB`부터 튜닝한다.
+- **대량 적재 시** — `refresh_interval: -1` + `number_of_replicas: 0`으로 적재한 뒤, 끝나면 원복하고 forcemerge한다.
+- **translog durability** — 처리량이 급하고 약간의 유실을 감수하면 `async` + `sync_interval`을 조정한다.
+
+</details>
+
+<details>
+<summary>안정성 · 운영</summary>
+
+- **master-eligible 3개(홀수)** — 과반 합의를 위해서다. 짝수는 split 위험만 늘린다.
+- **디스크 워터마크** — `low 85% / high 90% / flood_stage 95%`. flood 도달 시 인덱스가 read-only로 잠기니 모니터링이 필수다.
+- **circuit breaker** — ES7은 실제 힙 사용량 기반(`indices.breaker.total.use_real_memory: true`)으로 OOM 전에 요청을 차단한다.
+- **전용 coordinating 노드** — 집계·대량 검색이 많으면 LB 역할 노드를 분리해 data 노드를 보호한다.
+- **스레드풀** — `write`, `search` 풀의 큐 거절(rejected)을 모니터링한다. 거절이 잦으면 용량·샤드 설계 문제다.
+- **할당 어웨어니스** — `cluster.routing.allocation.awareness`로 랙/AZ 속성을 지정하면 primary와 replica가 서로 다른 존에 배치된다 → 존 1개 장애에도 데이터 유지.
+- **보안** — ES7부터 기본 라이선스에 TLS·기본 인증이 포함됐다. 노드 간/클라이언트 통신 암호화와 RBAC를 운영 기본으로 설정한다.
+
+</details>
+
+<details>
+<summary>백업 · 복구</summary>
+
+- **스냅샷 & 복원** — `_snapshot` API로 리포지터리(S3·공유 파일시스템 등)에 백업한다. 증분 방식이라 변경된 세그먼트만 저장한다.
+- **샤드 재배치** — 노드 추가/제거 시 마스터가 자동으로 샤드를 재분배한다. 대량 이동 시 네트워크 부하를 `cluster.routing.allocation` 스로틀로 조절한다.
+- **7.12+ searchable snapshots** — 스냅샷을 직접 검색 대상으로 마운트(frozen 티어)해 콜드 데이터 보관 비용을 절감한다.
+
+</details>
+
+<details>
+<summary>인덱스 관리 패턴</summary>
+
+- **index template** — 새 인덱스에 매핑·세팅을 자동 적용한다. 7.8+는 component template으로 조합할 수 있다.
+- **alias** — 애플리케이션은 항상 alias로 접근한다. reindex 후 alias만 바꿔치기하면 무중단 전환이 가능하다.
+- **매핑은 신중히** — 한 번 정한 필드 타입은 변경 불가(추가만 가능)다. 바꾸려면 reindex가 필요하니 운영 전 매핑 설계가 중요하다.
+- **dynamic mapping 제어** — 의도치 않은 필드 폭증을 막기 위해 `dynamic: strict` 또는 명시적 매핑을 권장한다.
+
+</details>
+
+## ES6에서 ES7로, 무엇이 달라졌나
+
+- 기본 primary 샤드 **5 → 1**
+- 매핑 타입 제거 — 인덱스당 `_doc` 하나
+- Zen Discovery → 새 합의 코디네이션, `minimum_master_nodes` 제거
+- 번들 JDK 포함, adaptive replica selection 기본 on, 실메모리 기반 circuit breaker
+- (7.9+) `node.roles` 배열 설정, 데이터 티어(hot/warm/cold/content) 도입
+
+## 마무리
+
+Elasticsearch 7은 인덱스 → 샤드 → 세그먼트로 내려가는 한 줄기 계층 위에서 동작한다. 쓰기는 refresh·translog·flush·merge로, 검색은 Query/Fetch 2단계로, 빠른 검색은 역색인으로 설명된다.
+
+핵심만 다시 묶으면, 샤드는 분산의 단위이자 Lucene 인덱스 그 자체이고, refresh와 flush는 다른 일이며, primary 샤드 수는 라우팅에 묶여 생성 후 못 바꾼다. 이 세 가지가 ES7 운영 판단의 대부분을 좌우한다.

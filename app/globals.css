@@ -128,3 +128,11 @@ body {
 .prose details > :last-child {
   margin-bottom: 0;
 }
+
+/* ── Figure / inline SVG diagrams ─────────────── */
+.prose figure svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
