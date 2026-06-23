@@ -1,23 +1,5 @@
 [
   {
-    "slug": "openai-sdk-v2-29-0-release",
-    "title": "OpenAI SDK v2.29.0 릴리즈",
-    "date": "2026-03-17",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/openai/openai-python/releases/tag/v2.29.0",
-    "description": "OpenAI SDK v2.29.0 정식 출시."
-  },
-  {
-    "slug": "java-26-ga-release",
-    "title": "Java 26 GA 릴리즈",
-    "date": "2026-03-17",
-    "category": "Java",
-    "type": "release",
-    "link": "https://openjdk.org/projects/jdk/26/",
-    "description": "OpenJDK 26 정식 출시."
-  },
-  {
     "slug": "openai-sdk-v2-30-0-release",
     "title": "OpenAI SDK v2.30.0 릴리즈",
     "date": "2026-03-25",
@@ -45,15 +27,6 @@
     "description": "OpenAI SDK v2.32.0 정식 출시."
   },
   {
-    "slug": "anthropic-sdk-v0-97-0-release",
-    "title": "Anthropic SDK v0.97.0 릴리즈",
-    "date": "2026-04-23",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.97.0",
-    "description": "Anthropic SDK v0.97.0 정식 출시."
-  },
-  {
     "slug": "openai-sdk-v2-33-0-release",
     "title": "OpenAI SDK v2.33.0 릴리즈",
     "date": "2026-04-28",
@@ -61,15 +34,6 @@
     "type": "ai-release",
     "link": "https://github.com/openai/openai-python/releases/tag/v2.33.0",
     "description": "OpenAI SDK v2.33.0 정식 출시."
-  },
-  {
-    "slug": "anthropic-sdk-v0-98-0-release",
-    "title": "Anthropic SDK v0.98.0 릴리즈",
-    "date": "2026-05-04",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.98.0",
-    "description": "Anthropic SDK v0.98.0 정식 출시."
   },
   {
     "slug": "openai-sdk-v2-34-0-release",
@@ -286,6 +250,42 @@
     "type": "release",
     "link": "https://github.com/spring-projects/spring-boot/releases/tag/v4.1.0",
     "description": "Spring Boot v4.1.0 정식 출시."
+  },
+  {
+    "slug": "openai-sdk-v2-42-0-release",
+    "title": "OpenAI SDK v2.42.0 릴리즈",
+    "date": "2026-06-16",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/openai/openai-python/releases/tag/v2.42.0",
+    "description": "OpenAI SDK v2.42.0 정식 출시."
+  },
+  {
+    "slug": "openai-sdk-v2-43-0-release",
+    "title": "OpenAI SDK v2.43.0 릴리즈",
+    "date": "2026-06-17",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/openai/openai-python/releases/tag/v2.43.0",
+    "description": "OpenAI SDK v2.43.0 정식 출시."
+  },
+  {
+    "slug": "anthropic-sdk-v0-111-0-release",
+    "title": "Anthropic SDK v0.111.0 릴리즈",
+    "date": "2026-06-18",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.111.0",
+    "description": "Anthropic SDK v0.111.0 정식 출시."
+  },
+  {
+    "slug": "anthropic-sdk-v0-110-0-release",
+    "title": "Anthropic SDK v0.110.0 릴리즈",
+    "date": "2026-06-18",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.110.0",
+    "description": "Anthropic SDK v0.110.0 정식 출시."
   },
   {
     "slug": "java-27-ga-release",
