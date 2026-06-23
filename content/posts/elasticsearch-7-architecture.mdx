@@ -1,0 +1,606 @@
+---
+title: "Elasticsearch 7 아키텍처 — 검색 엔진의 속을 들여다보다"
+date: "2026-04-14"
+category: "Backend"
+tags: ["Elasticsearch", "검색 엔진", "분산 시스템", "Lucene", "역색인"]
+summary: "Elasticsearch는 JSON 문서를 색인해 전문 검색과 집계를 고속으로 수행하는 분산 검색·분석 엔진이다. Index → Shard → Segment로 내려가는 계층 구조와 쓰기·검색 경로, 복제·장애 복구까지 실무 관점으로 정리한다."
+published: true
+---
+
+## 개요
+
+Elasticsearch는 "Apache Lucene 위에 세운 분산 검색·분석 엔진"이다. JSON 문서를 색인하면 단어 기반 전문 검색과 조건별 통계 처리를 빠르게 수행한다.
+
+검색, 로그·관측성, 분석 대시보드 같은 워크로드에 적합하다. 트랜잭션·조인 중심의 주 저장소가 아니라 보조 계층이라는 점을 먼저 짚고 가자. Elasticsearch의 설계 철학은 수평 확장, 고가용성, near real-time이다.
+
+<svg viewBox="0 0 660 56" xmlns="http://www.w3.org/2000/svg" style={{width:'100%',maxWidth:'660px',display:'block',margin:'1.5rem auto'}}>
+  <rect x="0" y="0" width="660" height="56" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1"/>
+  <text x="16" y="20" fontSize="11" fontWeight="700" fill="#334155" fontFamily="monospace">RDB vs Elasticsearch 용어 대응</text>
+  <rect x="16" y="30" width="10" height="10" rx="2" fill="#dbeafe"/>
+  <text x="32" y="39" fontSize="10" fill="#374151" fontFamily="monospace">Database → Index</text>
+  <rect x="160" y="30" width="10" height="10" rx="2" fill="#dcfce7"/>
+  <text x="176" y="39" fontSize="10" fill="#374151" fontFamily="monospace">Table → Index/매핑</text>
+  <rect x="325" y="30" width="10" height="10" rx="2" fill="#fef9c3"/>
+  <text x="341" y="39" fontSize="10" fill="#374151" fontFamily="monospace">Row → Document (JSON)</text>
+  <rect x="510" y="30" width="10" height="10" rx="2" fill="#fce7f3"/>
+  <text x="526" y="39" fontSize="10" fill="#374151" fontFamily="monospace">Index → Inverted Index</text>
+</svg>
+
+## 클러스터 토폴로지
+
+Elasticsearch 클러스터는 `cluster.name`이 같은 노드들의 집합이다. 노드 하나는 ES 프로세스 하나에 대응하고, 외부 통신은 REST 9200, 내부 통신은 transport 9300 포트를 사용한다.
+
+Master 노드가 클러스터 상태(매핑·샤드 위치·노드 목록)를 관리하고, 상태 변경을 모든 노드에 publish한다.
+
+<svg viewBox="0 0 660 230" xmlns="http://www.w3.org/2000/svg" style={{width:'100%',maxWidth:'660px',display:'block',margin:'1.5rem auto'}}>
+  <defs>
+    <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrow-gray" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#94a3b8"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="660" height="230" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1"/>
+  <text x="330" y="20" fontSize="12" fontWeight="700" fill="#334155" fontFamily="monospace" textAnchor="middle">Elasticsearch Cluster (cluster.name: my-app)</text>
+  <rect x="30" y="35" width="180" height="80" rx="6" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1.5"/>
+  <text x="120" y="55" fontSize="11" fontWeight="700" fill="#1e40af" fontFamily="monospace" textAnchor="middle">Node 1 (Master)</text>
+  <text x="120" y="72" fontSize="9" fill="#3b82f6" fontFamily="monospace" textAnchor="middle">master-eligible, data</text>
+  <rect x="50" y="82" width="60" height="22" rx="3" fill="#bfdbfe" stroke="#3b82f6" strokeWidth="0.8"/>
+  <text x="80" y="97" fontSize="9" fill="#1e40af" fontFamily="monospace" textAnchor="middle">P0</text>
+  <rect x="120" y="82" width="60" height="22" rx="3" fill="#e0e7ff" stroke="#6366f1" strokeWidth="0.8"/>
+  <text x="150" y="97" fontSize="9" fill="#4338ca" fontFamily="monospace" textAnchor="middle">R1</text>
+  <rect x="240" y="35" width="180" height="80" rx="6" fill="#f0fdf4" stroke="#22c55e" strokeWidth="1.5"/>
+  <text x="330" y="55" fontSize="11" fontWeight="700" fill="#166534" fontFamily="monospace" textAnchor="middle">Node 2 (Data)</text>
+  <text x="330" y="72" fontSize="9" fill="#22c55e" fontFamily="monospace" textAnchor="middle">data</text>
+  <rect x="260" y="82" width="60" height="22" rx="3" fill="#bbf7d0" stroke="#22c55e" strokeWidth="0.8"/>
+  <text x="290" y="97" fontSize="9" fill="#166534" fontFamily="monospace" textAnchor="middle">P1</text>
+  <rect x="330" y="82" width="60" height="22" rx="3" fill="#e0e7ff" stroke="#6366f1" strokeWidth="0.8"/>
+  <text x="360" y="97" fontSize="9" fill="#4338ca" fontFamily="monospace" textAnchor="middle">R2</text>
+  <rect x="450" y="35" width="180" height="80" rx="6" fill="#f0fdf4" stroke="#22c55e" strokeWidth="1.5"/>
+  <text x="540" y="55" fontSize="11" fontWeight="700" fill="#166534" fontFamily="monospace" textAnchor="middle">Node 3 (Data)</text>
+  <text x="540" y="72" fontSize="9" fill="#22c55e" fontFamily="monospace" textAnchor="middle">data</text>
+  <rect x="470" y="82" width="60" height="22" rx="3" fill="#bbf7d0" stroke="#22c55e" strokeWidth="0.8"/>
+  <text x="500" y="97" fontSize="9" fill="#166534" fontFamily="monospace" textAnchor="middle">P2</text>
+  <rect x="540" y="82" width="60" height="22" rx="3" fill="#e0e7ff" stroke="#6366f1" strokeWidth="0.8"/>
+  <text x="570" y="97" fontSize="9" fill="#4338ca" fontFamily="monospace" textAnchor="middle">R0</text>
+  <path d="M210,75 L240,75" stroke="#94a3b8" strokeWidth="1" markerEnd="url(#arrow-gray)" fill="none"/>
+  <path d="M420,75 L450,75" stroke="#94a3b8" strokeWidth="1" markerEnd="url(#arrow-gray)" fill="none"/>
+  <text x="16" y="145" fontSize="10" fontWeight="600" fill="#475569" fontFamily="monospace">범례</text>
+  <rect x="16" y="153" width="40" height="14" rx="3" fill="#bfdbfe" stroke="#3b82f6" strokeWidth="0.8"/>
+  <text x="64" y="164" fontSize="9" fill="#374151" fontFamily="monospace">Primary 샤드</text>
+  <rect x="160" y="153" width="40" height="14" rx="3" fill="#e0e7ff" stroke="#6366f1" strokeWidth="0.8"/>
+  <text x="208" y="164" fontSize="9" fill="#374151" fontFamily="monospace">Replica 샤드</text>
+  <rect x="340" y="153" width="12" height="14" rx="3" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1"/>
+  <text x="360" y="164" fontSize="9" fill="#374151" fontFamily="monospace">Master-eligible 노드</text>
+  <rect x="500" y="153" width="12" height="14" rx="3" fill="#f0fdf4" stroke="#22c55e" strokeWidth="1"/>
+  <text x="520" y="164" fontSize="9" fill="#374151" fontFamily="monospace">Data 노드</text>
+  <rect x="16" y="180" width="628" height="38" rx="6" fill="#fffbeb" stroke="#f59e0b" strokeWidth="0.8"/>
+  <text x="24" y="196" fontSize="10" fill="#92400e" fontFamily="monospace">✦ Primary와 Replica는 반드시 다른 노드에 배치된다.</text>
+  <text x="24" y="210" fontSize="10" fill="#92400e" fontFamily="monospace">✦ Replica 수는 운영 중 변경 가능하지만, Primary 수는 생성 시 고정된다.</text>
+</svg>
+
+멀티 클러스터 환경에서는 Cross-Cluster Search(CCS)로 여러 클러스터를 동시에 검색하거나, Cross-Cluster Replication(CCR)으로 원격 클러스터에 인덱스를 복제할 수 있다.
+
+## 논리 구조와 물리 구조
+
+Elasticsearch의 데이터 계층은 Index → Shard → Segment 세 단계로 내려간다.
+
+<svg viewBox="0 0 660 310" xmlns="http://www.w3.org/2000/svg" style={{width:'100%',maxWidth:'660px',display:'block',margin:'1.5rem auto'}}>
+  <defs>
+    <marker id="arrow-down" markerWidth="8" markerHeight="6" refX="4" refY="6" orient="auto">
+      <polygon points="0 0, 8 0, 4 6" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="660" height="310" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1"/>
+  <text x="330" y="22" fontSize="12" fontWeight="700" fill="#334155" fontFamily="monospace" textAnchor="middle">Index → Shard → Segment 계층</text>
+  <rect x="200" y="35" width="260" height="36" rx="6" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1.5"/>
+  <text x="330" y="58" fontSize="11" fontWeight="700" fill="#1e40af" fontFamily="monospace" textAnchor="middle">Index (매핑 + 세팅)</text>
+  <path d="M270,71 L270,86" stroke="#64748b" strokeWidth="1" markerEnd="url(#arrow-down)" fill="none"/>
+  <path d="M390,71 L390,86" stroke="#64748b" strokeWidth="1" markerEnd="url(#arrow-down)" fill="none"/>
+  <rect x="80" y="90" width="230" height="36" rx="6" fill="#bbf7d0" stroke="#22c55e" strokeWidth="1.5"/>
+  <text x="195" y="113" fontSize="11" fontWeight="700" fill="#166534" fontFamily="monospace" textAnchor="middle">Shard P0 (= Lucene Index)</text>
+  <rect x="350" y="90" width="230" height="36" rx="6" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.5"/>
+  <text x="465" y="113" fontSize="11" fontWeight="700" fill="#4338ca" fontFamily="monospace" textAnchor="middle">Shard R0 (Replica, 다른 노드)</text>
+  <path d="M155,126 L155,146" stroke="#64748b" strokeWidth="1" markerEnd="url(#arrow-down)" fill="none"/>
+  <path d="M235,126 L235,146" stroke="#64748b" strokeWidth="1" markerEnd="url(#arrow-down)" fill="none"/>
+  <rect x="40" y="150" width="155" height="145" rx="6" fill="#f0fdf4" stroke="#86efac" strokeWidth="1"/>
+  <text x="117" y="170" fontSize="10" fontWeight="600" fill="#166534" fontFamily="monospace" textAnchor="middle">Segments (불변)</text>
+  <rect x="55" y="180" width="125" height="20" rx="3" fill="#dcfce7" stroke="#22c55e" strokeWidth="0.8"/>
+  <text x="117" y="194" fontSize="9" fill="#166534" fontFamily="monospace" textAnchor="middle">segment _0 [doc doc doc]</text>
+  <rect x="55" y="205" width="125" height="20" rx="3" fill="#dcfce7" stroke="#22c55e" strokeWidth="0.8"/>
+  <text x="117" y="219" fontSize="9" fill="#166534" fontFamily="monospace" textAnchor="middle">segment _1 [doc doc]</text>
+  <rect x="55" y="230" width="125" height="20" rx="3" fill="#dcfce7" stroke="#22c55e" strokeWidth="0.8"/>
+  <text x="117" y="244" fontSize="9" fill="#166534" fontFamily="monospace" textAnchor="middle">segment _2 [doc]</text>
+  <rect x="55" y="260" width="125" height="22" rx="3" fill="#fef9c3" stroke="#ca8a04" strokeWidth="0.8"/>
+  <text x="117" y="275" fontSize="9" fill="#92400e" fontFamily="monospace" textAnchor="middle">translog (WAL)</text>
+  <rect x="210" y="150" width="190" height="145" rx="6" fill="#fefce8" stroke="#facc15" strokeWidth="1"/>
+  <text x="305" y="170" fontSize="10" fontWeight="600" fill="#854d0e" fontFamily="monospace" textAnchor="middle">각 Segment 내부</text>
+  <rect x="220" y="180" width="170" height="18" rx="3" fill="#fef9c3" stroke="#eab308" strokeWidth="0.8"/>
+  <text x="305" y="193" fontSize="9" fill="#854d0e" fontFamily="monospace" textAnchor="middle">Inverted Index (term→doc 매핑)</text>
+  <rect x="220" y="203" width="170" height="18" rx="3" fill="#fef9c3" stroke="#eab308" strokeWidth="0.8"/>
+  <text x="305" y="216" fontSize="9" fill="#854d0e" fontFamily="monospace" textAnchor="middle">Stored Fields (_source)</text>
+  <rect x="220" y="226" width="170" height="18" rx="3" fill="#fef9c3" stroke="#eab308" strokeWidth="0.8"/>
+  <text x="305" y="239" fontSize="9" fill="#854d0e" fontFamily="monospace" textAnchor="middle">Doc Values (정렬·집계용 컬럼)</text>
+  <rect x="220" y="249" width="170" height="18" rx="3" fill="#fef9c3" stroke="#eab308" strokeWidth="0.8"/>
+  <text x="305" y="262" fontSize="9" fill="#854d0e" fontFamily="monospace" textAnchor="middle">Norms (스코어링 가중치)</text>
+  <rect x="220" y="272" width="170" height="18" rx="3" fill="#fef9c3" stroke="#eab308" strokeWidth="0.8"/>
+  <text x="305" y="285" fontSize="9" fill="#854d0e" fontFamily="monospace" textAnchor="middle">Points (숫자·위치 BKD 트리)</text>
+  <rect x="420" y="150" width="220" height="55" rx="6" fill="#eff6ff" stroke="#93c5fd" strokeWidth="1"/>
+  <text x="530" y="170" fontSize="10" fontWeight="600" fill="#1e40af" fontFamily="monospace" textAnchor="middle">핵심 제약</text>
+  <text x="430" y="187" fontSize="9" fill="#1e40af" fontFamily="monospace">• Segment는 생성 후 수정 불가 (불변)</text>
+  <text x="430" y="200" fontSize="9" fill="#1e40af" fontFamily="monospace">• Primary 샤드 수는 생성 시 고정</text>
+</svg>
+
+- **Index**: 매핑과 세팅을 가진 논리 단위다. ES7부터 타입이 하나(`_doc`)로 통합됐다.
+- **Shard**: 인덱스의 조각이자 독립된 Lucene 인덱스. ES7의 기본값은 primary 1, replica 1이다 (ES6의 primary 5에서 변경).
+- **Segment**: 불변 파일 묶음이다. 생성 후 수정할 수 없고, 삭제는 표시만 해둔다.
+
+## 노드 역할과 클러스터 코디네이션
+
+ES7에서는 노드 역할이 명확히 분리됐다.
+
+<svg viewBox="0 0 660 185" xmlns="http://www.w3.org/2000/svg" style={{width:'100%',maxWidth:'660px',display:'block',margin:'1.5rem auto'}}>
+  <rect x="0" y="0" width="660" height="185" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1"/>
+  <text x="330" y="20" fontSize="12" fontWeight="700" fill="#334155" fontFamily="monospace" textAnchor="middle">ES7 노드 역할</text>
+  <rect x="16" y="32" width="145" height="70" rx="6" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1.5"/>
+  <text x="88" y="52" fontSize="11" fontWeight="700" fill="#1e40af" fontFamily="monospace" textAnchor="middle">master-eligible</text>
+  <text x="88" y="68" fontSize="9" fill="#3b82f6" fontFamily="monospace" textAnchor="middle">클러스터 상태 관리</text>
+  <text x="88" y="80" fontSize="9" fill="#3b82f6" fontFamily="monospace" textAnchor="middle">샤드 할당 · 노드 추적</text>
+  <text x="88" y="92" fontSize="9" fill="#64748b" fontFamily="monospace" textAnchor="middle">보통 3개 (홀수)</text>
+  <rect x="175" y="32" width="145" height="70" rx="6" fill="#dcfce7" stroke="#22c55e" strokeWidth="1.5"/>
+  <text x="247" y="52" fontSize="11" fontWeight="700" fill="#166534" fontFamily="monospace" textAnchor="middle">data</text>
+  <text x="247" y="68" fontSize="9" fill="#22c55e" fontFamily="monospace" textAnchor="middle">샤드 저장</text>
+  <text x="247" y="80" fontSize="9" fill="#22c55e" fontFamily="monospace" textAnchor="middle">CRUD · 검색 · 집계</text>
+  <text x="247" y="92" fontSize="9" fill="#64748b" fontFamily="monospace" textAnchor="middle">CPU·메모리·디스크 집약</text>
+  <rect x="334" y="32" width="145" height="70" rx="6" fill="#fef9c3" stroke="#eab308" strokeWidth="1.5"/>
+  <text x="406" y="52" fontSize="11" fontWeight="700" fill="#854d0e" fontFamily="monospace" textAnchor="middle">ingest</text>
+  <text x="406" y="68" fontSize="9" fill="#ca8a04" fontFamily="monospace" textAnchor="middle">인덱싱 전 전처리</text>
+  <text x="406" y="80" fontSize="9" fill="#ca8a04" fontFamily="monospace" textAnchor="middle">pipeline 실행</text>
+  <text x="406" y="92" fontSize="9" fill="#64748b" fontFamily="monospace" textAnchor="middle">변환·필터·보강</text>
+  <rect x="493" y="32" width="145" height="70" rx="6" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.5"/>
+  <text x="565" y="52" fontSize="11" fontWeight="700" fill="#4338ca" fontFamily="monospace" textAnchor="middle">coordinating</text>
+  <text x="565" y="68" fontSize="9" fill="#6366f1" fontFamily="monospace" textAnchor="middle">요청 분배 · 결과 병합</text>
+  <text x="565" y="80" fontSize="9" fill="#6366f1" fontFamily="monospace" textAnchor="middle">모든 노드의 기본 능력</text>
+  <text x="565" y="92" fontSize="9" fill="#64748b" fontFamily="monospace" textAnchor="middle">전용 노드 분리 가능</text>
+  <rect x="16" y="112" width="622" height="60" rx="6" fill="#eff6ff" stroke="#93c5fd" strokeWidth="1"/>
+  <text x="24" y="130" fontSize="10" fontWeight="600" fill="#1e40af" fontFamily="monospace">ES7 코디네이션 변화</text>
+  <text x="24" y="147" fontSize="9" fill="#334155" fontFamily="monospace">• discovery.seed_hosts: 접속 시도할 노드 후보 목록</text>
+  <text x="24" y="160" fontSize="9" fill="#334155" fontFamily="monospace">• cluster.initial_master_nodes: 최초 부트스트랩 전용 (재시작 시 사용 금지)</text>
+  <text x="370" y="147" fontSize="9" fill="#334155" fontFamily="monospace">• 투표 기반 마스터 선출 → split-brain 자동 방지</text>
+  <text x="370" y="160" fontSize="9" fill="#334155" fontFamily="monospace">• minimum_master_nodes 수동 설정 제거</text>
+</svg>
+
+ES 7.9부터는 `node.roles` 배열로 역할을 통합 설정할 수 있다.
+
+```yaml
+node.roles: [ master, data ]
+```
+
+## 샤드 라우팅 · 복제 · 장애 복구
+
+### 라우팅 공식
+
+문서가 어느 샤드에 저장될지는 다음 공식으로 결정된다.
+
+```
+shard = hash(_routing) % primary_shard_count
+```
+
+`_routing`의 기본값은 문서 `_id`다. 이 공식이 Primary 샤드 수가 생성 후 변경 불가인 이유다. 샤드 수가 바뀌면 동일 `_id`의 라우팅 결과가 달라져서 문서를 찾을 수 없게 된다.
+
+### 쓰기 흐름
+
+<svg viewBox="0 0 660 165" xmlns="http://www.w3.org/2000/svg" style={{width:'100%',maxWidth:'660px',display:'block',margin:'1.5rem auto'}}>
+  <defs>
+    <marker id="aw" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#3b82f6"/>
+    </marker>
+    <marker id="ag2" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#22c55e"/>
+    </marker>
+    <marker id="ao" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#f97316"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="660" height="165" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1"/>
+  <text x="330" y="20" fontSize="12" fontWeight="700" fill="#334155" fontFamily="monospace" textAnchor="middle">쓰기 경로 (Write Path)</text>
+  <rect x="20" y="35" width="80" height="32" rx="6" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.5"/>
+  <text x="60" y="55" fontSize="10" fontWeight="600" fill="#4338ca" fontFamily="monospace" textAnchor="middle">Client</text>
+  <path d="M100,51 L140,51" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#aw)" fill="none"/>
+  <text x="120" y="44" fontSize="8" fill="#3b82f6" fontFamily="monospace" textAnchor="middle">①</text>
+  <rect x="145" y="35" width="110" height="32" rx="6" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.5"/>
+  <text x="200" y="49" fontSize="10" fontWeight="600" fill="#4338ca" fontFamily="monospace" textAnchor="middle">Coordinating</text>
+  <text x="200" y="61" fontSize="8" fill="#6366f1" fontFamily="monospace" textAnchor="middle">라우팅 결정</text>
+  <path d="M255,51 L300,51" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#aw)" fill="none"/>
+  <text x="277" y="44" fontSize="8" fill="#3b82f6" fontFamily="monospace" textAnchor="middle">②</text>
+  <rect x="305" y="35" width="110" height="32" rx="6" fill="#bbf7d0" stroke="#22c55e" strokeWidth="1.5"/>
+  <text x="360" y="49" fontSize="10" fontWeight="600" fill="#166534" fontFamily="monospace" textAnchor="middle">Primary Shard</text>
+  <text x="360" y="61" fontSize="8" fill="#22c55e" fontFamily="monospace" textAnchor="middle">기록</text>
+  <path d="M415,45 L470,35" stroke="#22c55e" strokeWidth="1.5" markerEnd="url(#ag2)" fill="none"/>
+  <path d="M415,57 L470,67" stroke="#22c55e" strokeWidth="1.5" markerEnd="url(#ag2)" fill="none"/>
+  <text x="443" y="37" fontSize="8" fill="#22c55e" fontFamily="monospace" textAnchor="middle">③</text>
+  <rect x="475" y="20" width="110" height="28" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="1"/>
+  <text x="530" y="38" fontSize="9" fill="#166534" fontFamily="monospace" textAnchor="middle">Replica 1 (병렬)</text>
+  <rect x="475" y="55" width="110" height="28" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="1"/>
+  <text x="530" y="73" fontSize="9" fill="#166534" fontFamily="monospace" textAnchor="middle">Replica 2 (병렬)</text>
+  <path d="M585,34 L620,51" stroke="#f97316" strokeWidth="1.5" markerEnd="url(#ao)" fill="none"/>
+  <path d="M585,69 L620,51" stroke="#f97316" strokeWidth="1.5" markerEnd="url(#ao)" fill="none"/>
+  <rect x="595" y="37" width="50" height="28" rx="5" fill="#fed7aa" stroke="#f97316" strokeWidth="1"/>
+  <text x="620" y="55" fontSize="9" fontWeight="600" fill="#c2410c" fontFamily="monospace" textAnchor="middle">④ ACK</text>
+  <rect x="20" y="85" width="620" height="70" rx="6" fill="#fffbeb" stroke="#f59e0b" strokeWidth="0.8"/>
+  <text x="28" y="103" fontSize="10" fontWeight="600" fill="#92400e" fontFamily="monospace">흐름 정리</text>
+  <text x="28" y="119" fontSize="9" fill="#78350f" fontFamily="monospace">① Client → Coordinating: 아무 노드나 받을 수 있음</text>
+  <text x="28" y="133" fontSize="9" fill="#78350f" fontFamily="monospace">② Coordinating → Primary: hash(_routing) % primary 수로 대상 결정</text>
+  <text x="28" y="147" fontSize="9" fill="#78350f" fontFamily="monospace">③ Primary → in-sync Replica: 병렬 복제, 모두 성공해야 ④ 응답</text>
+</svg>
+
+### 읽기
+
+읽기는 Primary/Replica 아무 사본에서 가능하다. ES7은 기본적으로 **adaptive replica selection**을 사용해서 응답이 빠른 사본을 우선 선택한다.
+
+### 복제 내부
+
+- **seq_no · primary_term**: 쓰기 연산마다 시퀀스 번호와 primary 임기를 부여한다. 장애 시 어느 연산까지 복제됐는지 추적할 수 있다.
+- **체크포인트 기반 복구**: local/global checkpoint으로 복제 상태를 추적하고, 노드 복구 시 마지막 체크포인트 이후만 재전송한다.
+
+## 쓰기 경로: refresh · translog · flush · merge
+
+문서 하나가 색인될 때 거치는 단계를 시간축으로 보면 다음과 같다.
+
+<svg viewBox="0 0 660 240" xmlns="http://www.w3.org/2000/svg" style={{width:'100%',maxWidth:'660px',display:'block',margin:'1.5rem auto'}}>
+  <defs>
+    <marker id="ad2" markerWidth="8" markerHeight="6" refX="4" refY="6" orient="auto">
+      <polygon points="0 0, 8 0, 4 6" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="660" height="240" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1"/>
+  <text x="330" y="20" fontSize="12" fontWeight="700" fill="#334155" fontFamily="monospace" textAnchor="middle">쓰기 경로 타임라인</text>
+  <rect x="20" y="34" width="615" height="42" rx="6" fill="#fef2f2" stroke="#fca5a5" strokeWidth="1"/>
+  <text x="28" y="52" fontSize="10" fontWeight="700" fill="#dc2626" fontFamily="monospace">1단계</text>
+  <text x="80" y="52" fontSize="10" fill="#374151" fontFamily="monospace">인메모리 버퍼 + translog(디스크 WAL)에 기록</text>
+  <text x="490" y="52" fontSize="9" fill="#dc2626" fontFamily="monospace">검색 불가 ✗</text>
+  <text x="490" y="66" fontSize="9" fill="#16a34a" fontFamily="monospace">내구성 확보 ✓</text>
+  <path d="M327,76 L327,90" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#ad2)" fill="none"/>
+  <rect x="250" y="80" width="155" height="18" rx="4" fill="#fef9c3" stroke="#eab308" strokeWidth="1"/>
+  <text x="327" y="93" fontSize="9" fontWeight="600" fill="#854d0e" fontFamily="monospace" textAnchor="middle">↓ refresh (기본 1초)</text>
+  <rect x="20" y="100" width="615" height="42" rx="6" fill="#fffbeb" stroke="#fcd34d" strokeWidth="1"/>
+  <text x="28" y="118" fontSize="10" fontWeight="700" fill="#ca8a04" fontFamily="monospace">2단계</text>
+  <text x="80" y="118" fontSize="10" fill="#374151" fontFamily="monospace">새 세그먼트 생성 → OS 파일 캐시에 적재</text>
+  <text x="490" y="118" fontSize="9" fill="#16a34a" fontFamily="monospace">검색 가능 ✓</text>
+  <text x="490" y="132" fontSize="9" fill="#dc2626" fontFamily="monospace">내구성 미확보 ✗</text>
+  <path d="M327,142 L327,156" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#ad2)" fill="none"/>
+  <rect x="250" y="146" width="155" height="18" rx="4" fill="#fef9c3" stroke="#eab308" strokeWidth="1"/>
+  <text x="327" y="159" fontSize="9" fontWeight="600" fill="#854d0e" fontFamily="monospace" textAnchor="middle">↓ flush (주기적)</text>
+  <rect x="20" y="166" width="615" height="42" rx="6" fill="#f0fdf4" stroke="#86efac" strokeWidth="1"/>
+  <text x="28" y="184" fontSize="10" fontWeight="700" fill="#16a34a" fontFamily="monospace">3단계</text>
+  <text x="80" y="184" fontSize="10" fill="#374151" fontFamily="monospace">디스크 fsync — translog 비움</text>
+  <text x="490" y="184" fontSize="9" fill="#16a34a" fontFamily="monospace">검색 가능 ✓</text>
+  <text x="490" y="198" fontSize="9" fill="#16a34a" fontFamily="monospace">내구성 확보 ✓</text>
+  <rect x="20" y="214" width="615" height="20" rx="4" fill="#e0e7ff" stroke="#a5b4fc" strokeWidth="0.8"/>
+  <text x="327" y="228" fontSize="9" fill="#4338ca" fontFamily="monospace" textAnchor="middle">백그라운드 merge: 작은 세그먼트 → 큰 세그먼트로 병합 · 삭제 표시 정리</text>
+</svg>
+
+핵심은 **refresh ≠ flush**라는 것이다. refresh는 검색 가능 상태를 만들고(기본 1초), flush는 디스크에 영구 저장한다. 이 1초 간격이 Elasticsearch가 "near real-time"인 이유다. 색인 직후 바로 검색되지 않는다.
+
+```yaml
+# 급한 경우: 색인 후 즉시 검색 가능하게
+POST /my-index/_doc/1?refresh=wait_for
+
+# 처리량 우선: 대량 적재 시 refresh 끄기
+index.refresh_interval: -1
+```
+
+**Translog**은 내구성을 담당한다. flush 전에 노드가 죽으면 translog를 재생해서 데이터를 복구한다.
+
+```yaml
+# 기본값: 매 요청마다 fsync (안전하지만 느림)
+index.translog.durability: request
+
+# 성능 우선: 비동기 sync (유실 위험 있음)
+index.translog.durability: async
+index.translog.sync_interval: 5s
+```
+
+**Merge**는 세그먼트 관리의 핵심이다. 세그먼트는 불변이므로 update는 "기존 문서 삭제 표시 + 새 문서 추가"로 처리된다. 삭제 표시된 문서는 merge 때 실제로 정리된다. 색인이 완료된 인덱스에 `_forcemerge`를 실행하면 검색 성능이 올라간다.
+
+## 검색 경로: Query → Fetch (scatter-gather)
+
+검색은 2단계로 나뉜다.
+
+<svg viewBox="0 0 660 240" xmlns="http://www.w3.org/2000/svg" style={{width:'100%',maxWidth:'660px',display:'block',margin:'1.5rem auto'}}>
+  <defs>
+    <marker id="aq" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#6366f1"/>
+    </marker>
+    <marker id="af" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#f97316"/>
+    </marker>
+    <marker id="ab" markerWidth="8" markerHeight="6" refX="0" refY="3" orient="auto">
+      <polygon points="8 0, 0 3, 8 6" fill="#6366f1"/>
+    </marker>
+    <marker id="afb" markerWidth="8" markerHeight="6" refX="0" refY="3" orient="auto">
+      <polygon points="8 0, 0 3, 8 6" fill="#f97316"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="660" height="240" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1"/>
+  <text x="330" y="22" fontSize="12" fontWeight="700" fill="#334155" fontFamily="monospace" textAnchor="middle">검색 2단계: Query → Fetch</text>
+  <rect x="0" y="30" width="660" height="95" rx="0" fill="#eff6ff"/>
+  <text x="16" y="48" fontSize="11" fontWeight="700" fill="#4338ca" fontFamily="monospace">Query 단계</text>
+  <rect x="20" y="58" width="100" height="55" rx="6" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.5"/>
+  <text x="70" y="76" fontSize="10" fontWeight="600" fill="#4338ca" fontFamily="monospace" textAnchor="middle">Coordinating</text>
+  <text x="70" y="90" fontSize="8" fill="#6366f1" fontFamily="monospace" textAnchor="middle">요청 분배</text>
+  <text x="70" y="102" fontSize="8" fill="#6366f1" fontFamily="monospace" textAnchor="middle">결과 병합</text>
+  <path d="M120,72 L200,55" stroke="#6366f1" strokeWidth="1.2" markerEnd="url(#aq)" fill="none"/>
+  <path d="M120,85 L200,85" stroke="#6366f1" strokeWidth="1.2" markerEnd="url(#aq)" fill="none"/>
+  <path d="M120,98 L200,115" stroke="#6366f1" strokeWidth="1.2" markerEnd="url(#aq)" fill="none"/>
+  <rect x="205" y="40" width="120" height="28" rx="5" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1"/>
+  <text x="265" y="58" fontSize="9" fill="#1e40af" fontFamily="monospace" textAnchor="middle">Shard 0</text>
+  <rect x="205" y="72" width="120" height="28" rx="5" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1"/>
+  <text x="265" y="90" fontSize="9" fill="#1e40af" fontFamily="monospace" textAnchor="middle">Shard 1</text>
+  <rect x="205" y="104" width="120" height="28" rx="5" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1"/>
+  <text x="265" y="122" fontSize="9" fill="#1e40af" fontFamily="monospace" textAnchor="middle">Shard 2</text>
+  <path d="M325,54 L395,54" stroke="#6366f1" strokeWidth="1" strokeDasharray="4,2" markerEnd="url(#aq)" fill="none"/>
+  <path d="M325,86 L395,86" stroke="#6366f1" strokeWidth="1" strokeDasharray="4,2" markerEnd="url(#aq)" fill="none"/>
+  <path d="M325,118 L395,118" stroke="#6366f1" strokeWidth="1" strokeDasharray="4,2" markerEnd="url(#aq)" fill="none"/>
+  <rect x="400" y="38" width="240" height="28" rx="5" fill="#e0e7ff" stroke="#a5b4fc" strokeWidth="0.8"/>
+  <text x="520" y="56" fontSize="9" fill="#4338ca" fontFamily="monospace" textAnchor="middle">_id + score만 반환 (본문 X)</text>
+  <rect x="400" y="70" width="240" height="28" rx="5" fill="#e0e7ff" stroke="#a5b4fc" strokeWidth="0.8"/>
+  <text x="520" y="88" fontSize="9" fill="#4338ca" fontFamily="monospace" textAnchor="middle">_id + score만 반환 (본문 X)</text>
+  <rect x="400" y="102" width="240" height="28" rx="5" fill="#e0e7ff" stroke="#a5b4fc" strokeWidth="0.8"/>
+  <text x="520" y="120" fontSize="9" fill="#4338ca" fontFamily="monospace" textAnchor="middle">_id + score만 반환 (본문 X)</text>
+  <rect x="0" y="130" width="660" height="110" rx="0" fill="#fff7ed"/>
+  <text x="16" y="148" fontSize="11" fontWeight="700" fill="#c2410c" fontFamily="monospace">Fetch 단계</text>
+  <rect x="20" y="158" width="100" height="36" rx="6" fill="#fed7aa" stroke="#f97316" strokeWidth="1.5"/>
+  <text x="70" y="174" fontSize="10" fontWeight="600" fill="#c2410c" fontFamily="monospace" textAnchor="middle">Coordinating</text>
+  <text x="70" y="186" fontSize="8" fill="#f97316" fontFamily="monospace" textAnchor="middle">전역 정렬 + top N</text>
+  <path d="M120,176 L200,162" stroke="#f97316" strokeWidth="1.2" markerEnd="url(#af)" fill="none"/>
+  <path d="M120,176 L200,192" stroke="#f97316" strokeWidth="1.2" markerEnd="url(#af)" fill="none"/>
+  <rect x="205" y="150" width="120" height="24" rx="5" fill="#ffedd5" stroke="#f97316" strokeWidth="1"/>
+  <text x="265" y="166" fontSize="9" fill="#c2410c" fontFamily="monospace" textAnchor="middle">Shard 0 (해당 건만)</text>
+  <rect x="205" y="180" width="120" height="24" rx="5" fill="#ffedd5" stroke="#f97316" strokeWidth="1"/>
+  <text x="265" y="196" fontSize="9" fill="#c2410c" fontFamily="monospace" textAnchor="middle">Shard 2 (해당 건만)</text>
+  <path d="M325,162 L395,162" stroke="#f97316" strokeWidth="1" strokeDasharray="4,2" markerEnd="url(#af)" fill="none"/>
+  <path d="M325,192 L395,192" stroke="#f97316" strokeWidth="1" strokeDasharray="4,2" markerEnd="url(#af)" fill="none"/>
+  <rect x="400" y="150" width="240" height="24" rx="5" fill="#fed7aa" stroke="#fb923c" strokeWidth="0.8"/>
+  <text x="520" y="166" fontSize="9" fill="#c2410c" fontFamily="monospace" textAnchor="middle">_source (본문) 반환</text>
+  <rect x="400" y="180" width="240" height="24" rx="5" fill="#fed7aa" stroke="#fb923c" strokeWidth="0.8"/>
+  <text x="520" y="196" fontSize="9" fill="#c2410c" fontFamily="monospace" textAnchor="middle">_source (본문) 반환</text>
+  <rect x="400" y="212" width="240" height="24" rx="5" fill="#fef2f2" stroke="#fca5a5" strokeWidth="1"/>
+  <text x="520" y="228" fontSize="9" fontWeight="600" fill="#dc2626" fontFamily="monospace" textAnchor="middle">⚠ Deep paging: from:10000이면 각 샤드 10010건 정렬</text>
+</svg>
+
+Query 단계에서는 모든 샤드에 검색을 보내고, 각 샤드는 `_id`와 점수만 돌려준다. Coordinating 노드가 전역 정렬 후 상위 N건을 확정하면, Fetch 단계에서 해당 샤드에서만 본문(`_source`)을 회수한다.
+
+**Deep paging 함정**: `from: 10000, size: 10`이면 각 샤드가 10,010건을 정렬해서 보내야 한다. 해결책은 `search_after`, `scroll`, 또는 7.10+ Point in Time(PIT)을 사용하는 것이다.
+
+**집계(Aggregation)**: 검색과 별개 경로로, 각 샤드가 부분 집계 후 coordinating이 합산한다. `doc_values`(디스크 컬럼 저장)를 사용해서 고속화한다.
+
+**스코어링**: ES7 기본은 **BM25** (TF-IDF 개선판)이다. `filter` 컨텍스트는 점수 계산을 건너뛰고 캐시된다.
+
+## 역색인(Inverted Index)
+
+역색인은 Elasticsearch가 빠른 이유의 핵심이다.
+
+<svg viewBox="0 0 660 200" xmlns="http://www.w3.org/2000/svg" style={{width:'100%',maxWidth:'660px',display:'block',margin:'1.5rem auto'}}>
+  <defs>
+    <marker id="ai" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#8b5cf6"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="660" height="200" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1"/>
+  <text x="330" y="20" fontSize="12" fontWeight="700" fill="#334155" fontFamily="monospace" textAnchor="middle">역색인 (Inverted Index) 원리</text>
+  <rect x="20" y="35" width="240" height="110" rx="6" fill="#eff6ff" stroke="#93c5fd" strokeWidth="1"/>
+  <text x="140" y="52" fontSize="10" fontWeight="600" fill="#1e40af" fontFamily="monospace" textAnchor="middle">원본 문서</text>
+  <rect x="30" y="60" width="220" height="22" rx="3" fill="#dbeafe" stroke="#3b82f6" strokeWidth="0.8"/>
+  <text x="140" y="75" fontSize="9" fill="#1e40af" fontFamily="monospace" textAnchor="middle">doc1: "빠른 갈색 여우"</text>
+  <rect x="30" y="87" width="220" height="22" rx="3" fill="#dbeafe" stroke="#3b82f6" strokeWidth="0.8"/>
+  <text x="140" y="102" fontSize="9" fill="#1e40af" fontFamily="monospace" textAnchor="middle">doc2: "느린 갈색 개"</text>
+  <rect x="30" y="114" width="220" height="22" rx="3" fill="#dbeafe" stroke="#3b82f6" strokeWidth="0.8"/>
+  <text x="140" y="129" fontSize="9" fill="#1e40af" fontFamily="monospace" textAnchor="middle">doc3: "빠른 하얀 개"</text>
+  <path d="M260,90 L310,90" stroke="#8b5cf6" strokeWidth="2" markerEnd="url(#ai)" fill="none"/>
+  <text x="285" y="82" fontSize="9" fontWeight="600" fill="#8b5cf6" fontFamily="monospace" textAnchor="middle">분석</text>
+  <rect x="320" y="35" width="320" height="110" rx="6" fill="#faf5ff" stroke="#c4b5fd" strokeWidth="1"/>
+  <text x="480" y="52" fontSize="10" fontWeight="600" fill="#7c3aed" fontFamily="monospace" textAnchor="middle">역색인 (term → posting list)</text>
+  <rect x="330" y="60" width="60" height="18" rx="3" fill="#ede9fe" stroke="#a78bfa" strokeWidth="0.8"/>
+  <text x="360" y="73" fontSize="9" fill="#6d28d9" fontFamily="monospace" textAnchor="middle">빠른</text>
+  <text x="400" y="73" fontSize="9" fill="#374151" fontFamily="monospace">→ doc1, doc3</text>
+  <rect x="330" y="82" width="60" height="18" rx="3" fill="#ede9fe" stroke="#a78bfa" strokeWidth="0.8"/>
+  <text x="360" y="95" fontSize="9" fill="#6d28d9" fontFamily="monospace" textAnchor="middle">갈색</text>
+  <text x="400" y="95" fontSize="9" fill="#374151" fontFamily="monospace">→ doc1, doc2</text>
+  <rect x="330" y="104" width="60" height="18" rx="3" fill="#ede9fe" stroke="#a78bfa" strokeWidth="0.8"/>
+  <text x="360" y="117" fontSize="9" fill="#6d28d9" fontFamily="monospace" textAnchor="middle">여우</text>
+  <text x="400" y="117" fontSize="9" fill="#374151" fontFamily="monospace">→ doc1</text>
+  <rect x="500" y="60" width="60" height="18" rx="3" fill="#ede9fe" stroke="#a78bfa" strokeWidth="0.8"/>
+  <text x="530" y="73" fontSize="9" fill="#6d28d9" fontFamily="monospace" textAnchor="middle">개</text>
+  <text x="570" y="73" fontSize="9" fill="#374151" fontFamily="monospace">→ doc2, doc3</text>
+  <rect x="500" y="82" width="60" height="18" rx="3" fill="#ede9fe" stroke="#a78bfa" strokeWidth="0.8"/>
+  <text x="530" y="95" fontSize="9" fill="#6d28d9" fontFamily="monospace" textAnchor="middle">느린</text>
+  <text x="570" y="95" fontSize="9" fill="#374151" fontFamily="monospace">→ doc2</text>
+  <rect x="500" y="104" width="60" height="18" rx="3" fill="#ede9fe" stroke="#a78bfa" strokeWidth="0.8"/>
+  <text x="530" y="117" fontSize="9" fill="#6d28d9" fontFamily="monospace" textAnchor="middle">하얀</text>
+  <text x="570" y="117" fontSize="9" fill="#374151" fontFamily="monospace">→ doc3</text>
+  <rect x="20" y="155" width="620" height="35" rx="6" fill="#f0fdf4" stroke="#86efac" strokeWidth="0.8"/>
+  <text x="330" y="172" fontSize="10" fill="#166534" fontFamily="monospace" textAnchor="middle">검색: "갈색" → posting list 즉시 조회 → doc1, doc2 반환 (전체 문서 스캔 불필요)</text>
+  <text x="330" y="185" fontSize="9" fill="#15803d" fontFamily="monospace" textAnchor="middle">역색인은 세그먼트 단위로 존재한다. 세그먼트가 많으면 여러 역색인을 훑어야 → merge가 중요한 이유</text>
+</svg>
+
+### Analyzer
+
+색인·검색 시 텍스트를 term으로 변환하는 것이 Analyzer다.
+
+<svg viewBox="0 0 660 70" xmlns="http://www.w3.org/2000/svg" style={{width:'100%',maxWidth:'660px',display:'block',margin:'1.5rem auto'}}>
+  <defs>
+    <marker id="ap" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="660" height="70" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1"/>
+  <text x="16" y="18" fontSize="10" fontWeight="600" fill="#334155" fontFamily="monospace">Analyzer 파이프라인</text>
+  <rect x="16" y="30" width="130" height="28" rx="5" fill="#fef9c3" stroke="#eab308" strokeWidth="1"/>
+  <text x="81" y="48" fontSize="10" fontWeight="600" fill="#854d0e" fontFamily="monospace" textAnchor="middle">Char Filter</text>
+  <text x="81" y="25" fontSize="8" fill="#92400e" fontFamily="monospace" textAnchor="middle">HTML 제거, 패턴 치환</text>
+  <path d="M146,44 L175,44" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#ap)" fill="none"/>
+  <rect x="180" y="30" width="130" height="28" rx="5" fill="#bbf7d0" stroke="#22c55e" strokeWidth="1"/>
+  <text x="245" y="48" fontSize="10" fontWeight="600" fill="#166534" fontFamily="monospace" textAnchor="middle">Tokenizer</text>
+  <text x="245" y="25" fontSize="8" fill="#16a34a" fontFamily="monospace" textAnchor="middle">단어 분리 (공백, 형태소)</text>
+  <path d="M310,44 L340,44" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#ap)" fill="none"/>
+  <rect x="345" y="30" width="130" height="28" rx="5" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1"/>
+  <text x="410" y="48" fontSize="10" fontWeight="600" fill="#1e40af" fontFamily="monospace" textAnchor="middle">Token Filter</text>
+  <text x="410" y="25" fontSize="8" fill="#3b82f6" fontFamily="monospace" textAnchor="middle">소문자 변환, 불용어 제거</text>
+  <path d="M475,44 L505,44" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#ap)" fill="none"/>
+  <rect x="510" y="30" width="130" height="28" rx="5" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.5"/>
+  <text x="575" y="48" fontSize="10" fontWeight="700" fill="#4338ca" fontFamily="monospace" textAnchor="middle">Terms</text>
+  <text x="575" y="25" fontSize="8" fill="#6366f1" fontFamily="monospace" textAnchor="middle">역색인에 저장</text>
+</svg>
+
+한국어는 `nori` 플러그인을 사용한다. 색인 analyzer와 검색 analyzer를 분리할 수 있는데(색인엔 동의어 확장, 검색엔 미적용 등), 불일치하면 매칭이 안 되므로 주의가 필요하다.
+
+### text vs keyword
+
+| 타입 | 동작 | 용도 |
+|------|------|------|
+| `text` | analyzer로 쪼개서 역색인 저장 | 전문 검색 |
+| `keyword` | 통째로 저장 | 정확 일치 · 정렬 · 집계 |
+
+실무에서는 Multi-field 매핑으로 둘 다 사용하는 것이 일반적이다.
+
+```json
+{
+  "name": {
+    "type": "text",
+    "fields": {
+      "keyword": { "type": "keyword" }
+    }
+  }
+}
+```
+
+## 데이터 티어 & ILM 수명주기
+
+시계열 데이터(로그, 메트릭, 이벤트)는 시간이 지나면 가치가 떨어진다. Elasticsearch 7.9+의 데이터 티어와 ILM(Index Lifecycle Management)으로 이를 자동 관리한다.
+
+<svg viewBox="0 0 660 155" xmlns="http://www.w3.org/2000/svg" style={{width:'100%',maxWidth:'660px',display:'block',margin:'1.5rem auto'}}>
+  <defs>
+    <marker id="at" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="660" height="155" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1"/>
+  <text x="330" y="20" fontSize="12" fontWeight="700" fill="#334155" fontFamily="monospace" textAnchor="middle">ILM 데이터 티어 수명주기</text>
+  <rect x="16" y="35" width="110" height="55" rx="6" fill="#fef2f2" stroke="#ef4444" strokeWidth="1.5"/>
+  <text x="71" y="52" fontSize="11" fontWeight="700" fill="#dc2626" fontFamily="monospace" textAnchor="middle">Hot</text>
+  <text x="71" y="66" fontSize="8" fill="#991b1b" fontFamily="monospace" textAnchor="middle">SSD</text>
+  <text x="71" y="78" fontSize="8" fill="#991b1b" fontFamily="monospace" textAnchor="middle">쓰기 + 잦은 검색</text>
+  <path d="M126,62 L155,62" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#at)" fill="none"/>
+  <rect x="160" y="35" width="110" height="55" rx="6" fill="#fffbeb" stroke="#f59e0b" strokeWidth="1.5"/>
+  <text x="215" y="52" fontSize="11" fontWeight="700" fill="#d97706" fontFamily="monospace" textAnchor="middle">Warm</text>
+  <text x="215" y="66" fontSize="8" fill="#92400e" fontFamily="monospace" textAnchor="middle">읽기 전용</text>
+  <text x="215" y="78" fontSize="8" fill="#92400e" fontFamily="monospace" textAnchor="middle">shrink · forcemerge</text>
+  <path d="M270,62 L299,62" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#at)" fill="none"/>
+  <rect x="304" y="35" width="110" height="55" rx="6" fill="#eff6ff" stroke="#3b82f6" strokeWidth="1.5"/>
+  <text x="359" y="52" fontSize="11" fontWeight="700" fill="#2563eb" fontFamily="monospace" textAnchor="middle">Cold</text>
+  <text x="359" y="66" fontSize="8" fill="#1d4ed8" fontFamily="monospace" textAnchor="middle">드문 검색</text>
+  <text x="359" y="78" fontSize="8" fill="#1d4ed8" fontFamily="monospace" textAnchor="middle">replica 수 감소</text>
+  <path d="M414,62 L443,62" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#at)" fill="none"/>
+  <rect x="448" y="35" width="110" height="55" rx="6" fill="#f0f9ff" stroke="#7dd3fc" strokeWidth="1.5"/>
+  <text x="503" y="52" fontSize="11" fontWeight="700" fill="#0284c7" fontFamily="monospace" textAnchor="middle">Frozen</text>
+  <text x="503" y="66" fontSize="8" fill="#0369a1" fontFamily="monospace" textAnchor="middle">7.12+</text>
+  <text x="503" y="78" fontSize="8" fill="#0369a1" fontFamily="monospace" textAnchor="middle">스냅샷 마운트</text>
+  <path d="M558,62 L580,62" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#at)" fill="none"/>
+  <rect x="585" y="35" width="60" height="55" rx="6" fill="#f1f5f9" stroke="#94a3b8" strokeWidth="1.5"/>
+  <text x="615" y="52" fontSize="11" fontWeight="700" fill="#475569" fontFamily="monospace" textAnchor="middle">Delete</text>
+  <text x="615" y="66" fontSize="8" fill="#64748b" fontFamily="monospace" textAnchor="middle">자동 삭제</text>
+  <rect x="16" y="100" width="628" height="45" rx="6" fill="#fffbeb" stroke="#fcd34d" strokeWidth="0.8"/>
+  <text x="24" y="117" fontSize="10" fontWeight="600" fill="#92400e" fontFamily="monospace">Rollover</text>
+  <text x="100" y="117" fontSize="9" fill="#78350f" fontFamily="monospace">크기·문서수·기간 도달 시 새 인덱스로 전환, alias 자동 승계</text>
+  <text x="24" y="135" fontSize="10" fontWeight="600" fill="#92400e" fontFamily="monospace">ILM</text>
+  <text x="100" y="135" fontSize="9" fill="#78350f" fontFamily="monospace">위 단계 전환을 자동 수행 — 오래된 데이터의 저장 비용을 단계적으로 절감</text>
+</svg>
+
+## 실무에서 빠지면 안 되는 설정
+
+### 메모리·JVM
+
+<svg viewBox="0 0 660 80" xmlns="http://www.w3.org/2000/svg" style={{width:'100%',maxWidth:'660px',display:'block',margin:'1.5rem auto'}}>
+  <rect x="0" y="0" width="660" height="80" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1"/>
+  <text x="330" y="18" fontSize="10" fontWeight="700" fill="#334155" fontFamily="monospace" textAnchor="middle">물리 RAM 배분</text>
+  <rect x="30" y="30" width="290" height="28" rx="5" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1.5"/>
+  <text x="175" y="48" fontSize="10" fontWeight="600" fill="#1e40af" fontFamily="monospace" textAnchor="middle">JVM Heap (50%) — 26~30GB 이하 권장</text>
+  <rect x="325" y="30" width="290" height="28" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="1.5"/>
+  <text x="470" y="48" fontSize="10" fontWeight="600" fill="#166534" fontFamily="monospace" textAnchor="middle">OS 페이지 캐시 (50%) — Lucene이 사용</text>
+  <text x="330" y="73" fontSize="9" fill="#64748b" fontFamily="monospace" textAnchor="middle">Xms = Xmx 동일 설정 · 32GB 미만으로 JVM 압축 OOP 유지 · bootstrap.memory_lock: true로 스왑 방지</text>
+</svg>
+
+### 샤드 사이징
+
+- 샤드 1개당 **10~50GB**를 권장한다.
+- 노드당 샤드 수는 힙 1GB당 20개 이하가 경험칙이다.
+- `cluster.max_shards_per_node` 기본값은 1000.
+- ES7 기본이 primary 1이라 over-sharding은 줄었지만, 시계열 인덱스가 많으면 여전히 주의해야 한다.
+
+### 인덱싱 성능
+
+```yaml
+# 기본: Bulk API로 묶음 전송 (단건 X)
+# 배치 크기: 5~15MB부터 튜닝 시작
+
+# 대량 적재 시 최적화
+index.refresh_interval: -1
+index.number_of_replicas: 0
+# 완료 후 원복 + _forcemerge 실행
+```
+
+### 안정성·운영
+
+| 항목 | 설정 | 비고 |
+|------|------|------|
+| Master 노드 | 3개 (홀수) | 투표 기반 합의 |
+| 디스크 워터마크 | low 85% / high 90% / flood 95% | flood에서 쓰기 차단 |
+| Circuit breaker | `use_real_memory: true` | 실제 힙 사용량 기반 |
+| 존 분산 | `allocation.awareness` | 노드를 AZ별로 분산 |
+| 보안 | TLS + 기본 인증 + RBAC | 기본 라이선스에 포함 |
+
+### 백업·복구
+
+- **스냅샷**: `_snapshot` API로 S3·공유 파일시스템에 백업. 증분 방식으로 변경 세그먼트만 저장한다.
+- **Searchable snapshots** (7.12+): 스냅샷을 frozen 티어로 마운트해서 검색 가능한 상태로 유지한다.
+- **샤드 재배치**: 노드 추가/제거 시 자동 재분배된다.
+
+### 인덱스 관리
+
+- **Index template**: 새 인덱스에 매핑·세팅 자동 적용. 7.8+의 Component template으로 조합 가능.
+- **Alias**: 애플리케이션은 항상 alias로 접근한다. 무중단 인덱스 전환이 가능하다.
+- **매핑 주의**: 필드 타입은 변경 불가(추가만 가능). `dynamic: strict` 또는 명시적 매핑을 권장한다.
+
+## ES6에서 ES7로 주요 변화
+
+<svg viewBox="0 0 660 178" xmlns="http://www.w3.org/2000/svg" style={{width:'100%',maxWidth:'660px',display:'block',margin:'1.5rem auto'}}>
+  <rect x="0" y="0" width="660" height="178" rx="8" fill="#f8fafc" stroke="#e2e8f0" strokeWidth="1"/>
+  <text x="330" y="20" fontSize="12" fontWeight="700" fill="#334155" fontFamily="monospace" textAnchor="middle">ES6 → ES7 핵심 변경 사항</text>
+  <rect x="16" y="32" width="305" height="28" rx="5" fill="#fef2f2" stroke="#fca5a5" strokeWidth="1"/>
+  <text x="168" y="50" fontSize="10" fill="#dc2626" fontFamily="monospace" textAnchor="middle">ES6: 기본 primary 5 · 매핑 타입 여러 개</text>
+  <rect x="339" y="32" width="305" height="28" rx="5" fill="#f0fdf4" stroke="#86efac" strokeWidth="1"/>
+  <text x="491" y="50" fontSize="10" fill="#16a34a" fontFamily="monospace" textAnchor="middle">ES7: 기본 primary 1 · 타입 _doc 하나</text>
+  <rect x="16" y="66" width="305" height="28" rx="5" fill="#fef2f2" stroke="#fca5a5" strokeWidth="1"/>
+  <text x="168" y="84" fontSize="10" fill="#dc2626" fontFamily="monospace" textAnchor="middle">Zen Discovery + minimum_master_nodes 수동</text>
+  <rect x="339" y="66" width="305" height="28" rx="5" fill="#f0fdf4" stroke="#86efac" strokeWidth="1"/>
+  <text x="491" y="84" fontSize="10" fill="#16a34a" fontFamily="monospace" textAnchor="middle">새 합의 코디네이션 + 자동 quorum</text>
+  <rect x="16" y="100" width="305" height="28" rx="5" fill="#fef2f2" stroke="#fca5a5" strokeWidth="1"/>
+  <text x="168" y="118" fontSize="10" fill="#dc2626" fontFamily="monospace" textAnchor="middle">별도 JDK 설치 필요</text>
+  <rect x="339" y="100" width="305" height="28" rx="5" fill="#f0fdf4" stroke="#86efac" strokeWidth="1"/>
+  <text x="491" y="118" fontSize="10" fill="#16a34a" fontFamily="monospace" textAnchor="middle">번들 JDK 포함</text>
+  <rect x="16" y="134" width="305" height="28" rx="5" fill="#fef2f2" stroke="#fca5a5" strokeWidth="1"/>
+  <text x="168" y="152" fontSize="10" fill="#dc2626" fontFamily="monospace" textAnchor="middle">추정 기반 circuit breaker</text>
+  <rect x="339" y="134" width="305" height="28" rx="5" fill="#f0fdf4" stroke="#86efac" strokeWidth="1"/>
+  <text x="491" y="152" fontSize="10" fill="#16a34a" fontFamily="monospace" textAnchor="middle">실메모리 기반 circuit breaker</text>
+  <text x="330" y="175" fontSize="9" fill="#64748b" fontFamily="monospace" textAnchor="middle">+ adaptive replica selection 기본 활성화 · node.roles 배열(7.9+) · 데이터 티어 도입</text>
+</svg>
+
+## 마무리
+
+Elasticsearch 7은 **Index → Shard → Segment**로 내려가는 계층 구조 위에서 동작한다. 이 글을 관통하는 핵심 세 가지를 기억하자.
+
+1. **"샤드는 분산의 단위이자 Lucene 인덱스 그 자체다"** — 샤드 수 = Lucene 인스턴스 수. 너무 많으면 오버헤드, 너무 적으면 확장 한계.
+2. **"Refresh와 flush는 다른 일이다"** — refresh는 검색 가능, flush는 디스크 영구 저장. 이 구분이 near real-time과 내구성을 모두 설명한다.
+3. **"Primary 샤드 수는 라우팅에 묶여 생성 후 변경 불가"** — 운영 중 변경 가능한 건 replica 수뿐이다. 초기 설계가 중요한 이유.
