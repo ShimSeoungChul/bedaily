@@ -1,0 +1,1004 @@
+ ---
+title: "Redis 완전 정복 — 자료구조부터 모듈까지"
+date: "2026-06-24"
+category: "Backend"
+tags: ["Redis", "캐시", "자료구조", "메시징", "분산락"]
+summary: "메모리 위에서 마이크로초 단위로 답하는 Redis를 한 문서로 정리합니다. String·Hash·Set·ZSet·List·Stream 같은 자료구조부터 Pipeline·Lua·분산락, Pub/Sub·Streams, 그리고 JSON·Search·TimeSeries·Bloom·Graph 모듈까지 명령어와 내부 동작을 다이어그램과 함께 다룹니다."
+published: true
+---
+
+## 개요
+
+Redis(Remote Dictionary Server)는 디스크가 아니라 **메모리**를 1차 저장소로 쓰는 키-값 스토어다. 단순 캐시를 넘어 **데이터 구조 서버**로, 값에 타입(String·Hash·Set·Sorted Set·List·Stream)이 있고 각 타입마다 원자적 명령이 준비되어 있어 애플리케이션이 직접 짜야 할 동시성·자료구조 로직을 서버가 대신 처리한다.
+
+이 글은 5개 섹션·21개 주제로, 주제별 명령어와 내부 동작을 다이어그램으로 풀어 정리한다.
+
+# 01 · Redis 시작하기
+
+## Redis 소개와 핵심 특징
+
+Redis는 단순 캐시를 넘어 데이터 구조 서버다. 값에 타입이 있고, 각 타입마다 원자적 명령이 준비되어 있다.
+
+**핵심 특징**
+
+- **고성능** — 데이터를 주로 메모리에 두어 매우 빠른 읽기/쓰기. 캐싱·실시간 분석처럼 **낮은 지연(latency)** 이 필요한 곳에 이상적.
+- **영속성** — 인메모리지만 내구성을 위해 **RDB(스냅샷)** 과 **AOF(저널링)** 두 옵션 제공. memcached와 구분되는 결정적 차이.
+- **데이터 구조** — String·List·Set·Sorted Set 등 용도별 최적화. 카운터·중복 제거·랭킹을 자료구조 하나로 해결.
+- **원자적 연산** — 자료구조 위의 연산이 원자적. 분산 시스템·동시 접근 시나리오에 적합.
+- **Pub/Sub** — 채널 구독으로 실시간 메시지 수신. 채팅·알림 방송에 활용.
+- **Lua 스크립팅** — 서버 내부에서 스크립트 실행 → 복잡 작업을 원자적으로, 클라이언트-서버 왕복 감소.
+- **클러스터링** — 자동 샤딩 + 고가용성. 여러 인스턴스에 데이터를 분산해 중복성·장애 복구 보장.
+
+### RDB vs AOF — 영속성 두 갈래
+
+<Figure caption="RDB는 시점 사진, AOF는 변경 일지 — 둘을 함께 켜 빠른 복구와 낮은 손실을 동시에 노릴 수 있다">
+  <svg viewBox="0 0 760 250" role="img" aria-label="Redis 메모리와 RDB/AOF 영속성 구조">
+    <rect x="280" y="40" width="200" height="170" rx="12" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="380" y="68" textAnchor="middle" fontSize="14" fontWeight="700" fill="var(--text)">In-Memory</text>
+    <text x="380" y="86" textAnchor="middle" fontSize="11" fontFamily="ui-monospace, monospace" fill="var(--text-subtle)">dataset</text>
+    <rect x="305" y="100" width="150" height="22" rx="5" fill="var(--bg-subtle)" /><text x="315" y="115" fontSize="11" fontFamily="ui-monospace, monospace" fill="#33d6c0">user:1 → obj</text>
+    <rect x="305" y="128" width="150" height="22" rx="5" fill="var(--bg-subtle)" /><text x="315" y="143" fontSize="11" fontFamily="ui-monospace, monospace" fill="#33d6c0">cart:42 → [list]</text>
+    <rect x="305" y="156" width="150" height="22" rx="5" fill="var(--bg-subtle)" /><text x="315" y="171" fontSize="11" fontFamily="ui-monospace, monospace" fill="#33d6c0">rank → ZSET</text>
+    <path d="M280 110 L150 110" stroke="#ff4d40" strokeWidth="1.5" markerEnd="url(#rdbAr)" />
+    <text x="215" y="103" textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#ff7a70">주기적 스냅샷</text>
+    <rect x="20" y="80" width="120" height="60" rx="9" fill="var(--bg-subtle)" stroke="#7d1812" />
+    <text x="80" y="106" textAnchor="middle" fontSize="13" fontWeight="700" fill="#ff7a70">RDB</text>
+    <text x="80" y="125" textAnchor="middle" fontSize="10" fill="var(--text-muted)">dump.rdb · 시점 백업</text>
+    <path d="M480 110 L610 110" stroke="#33d6c0" strokeWidth="1.5" markerEnd="url(#rdbAt)" />
+    <text x="545" y="103" textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#33d6c0">쓰기 명령 append</text>
+    <rect x="620" y="80" width="120" height="60" rx="9" fill="var(--bg-subtle)" stroke="#0e4d46" />
+    <text x="680" y="106" textAnchor="middle" fontSize="13" fontWeight="700" fill="#33d6c0">AOF</text>
+    <text x="680" y="125" textAnchor="middle" fontSize="10" fill="var(--text-muted)">appendonly · 명령 로그</text>
+    <text x="80" y="165" textAnchor="middle" fontSize="10" fill="var(--text-subtle)">복구 빠름 · 데이터 손실 ↑</text>
+    <text x="680" y="165" textAnchor="middle" fontSize="10" fill="var(--text-subtle)">손실 최소 · 파일 큼</text>
+    <defs>
+      <marker id="rdbAr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#ff4d40" /></marker>
+      <marker id="rdbAt" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#33d6c0" /></marker>
+    </defs>
+  </svg>
+</Figure>
+
+## 설치 — Docker로 띄우고 redis-cli로 확인
+
+[hub.docker.com/_/redis](https://hub.docker.com/_/redis) 에서 태그를 고르고 `docker-compose.yml`로 실행한다.
+
+```yaml filename="docker-compose.yml"
+services:
+  redis:
+    image: redis:7.2.3
+    ports: ["6379:6379"]
+```
+
+```bash filename="terminal"
+$ docker compose up -d
+$ docker exec -it learn-redis-redis-1 redis-cli
+127.0.0.1:6379> set one 1
+OK
+127.0.0.1:6379> get one
+"1"
+```
+
+> **CLI** — 명령어 레퍼런스: [redis.io/commands](https://redis.io/commands/) · 치트시트: [quick-start cheat-sheet](https://developer.redis.com/howtos/quick-start/cheat-sheet/)
+
+## Python 클라이언트 (redis-py)
+
+```python filename="python"
+# pip install redis
+import redis
+r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+
+r.set('foo', 'bar')   # True
+r.get('foo')          # 'bar'
+```
+
+> **주의** — 응답은 기본적으로 **bytes**로 온다. 문자열로 받으려면 `decode_responses=True`. 성능이 중요하면 `hiredis`(C 파서)를 함께 설치하면 코드 변경 없이 빨라진다.
+
+# 02 · 데이터 타입
+
+## String — 가장 기본, 그러나 만능
+
+*도입: Redis 1.0+* · 텍스트뿐 아니라 **바이너리(이미지·직렬화 객체)** 까지 저장. 최대 **512MB**.
+
+**대표 명령어**
+
+| 명령 | 설명 |
+|---|---|
+| `SET key value` | 값 저장 |
+| `GET key` | 값 조회 |
+| `INCR / DECR key` | 정수값 ±1 (원자적) |
+| `APPEND key value` | 기존 값 뒤에 이어붙임 |
+| `GETRANGE key s e` | 부분 문자열(substring) |
+| `STRLEN key` | 값 길이 |
+
+**만료(TTL) & SET 옵션**
+
+- **EX / PX** — 초 / 밀리초 단위 만료. `SET k v EX 3600` (2.6.12+)
+- **EXAT / PXAT** — 절대 UNIX 타임스탬프(초/밀리초)로 만료 시점 지정. (6.2+)
+- **NX / XX** — 키가 **없을 때만** / **있을 때만** 저장. (락의 핵심) (2.6.12+)
+- **KEEPTTL** — 값을 덮어써도 기존 TTL 유지. (6.0+)
+- **GET** — SET하면서 이전 값을 함께 반환. (6.2+)
+
+```bash filename="redis-cli"
+> SET user:1 "Alice"
+OK
+> GET user:1
+"Alice"
+> APPEND user:1 " Kim"
+(integer) 9          # 이어붙인 뒤 전체 길이
+> GETRANGE user:1 0 4
+"Alice"              # 0~4번째 부분 문자열
+> STRLEN user:1
+(integer) 9
+> SET cnt 100
+OK
+> INCR cnt
+(integer) 101
+> DECR cnt
+(integer) 100
+# ── SET 옵션 ──
+> SET token abc EX 60
+OK           # 60초 후 만료 (PX=밀리초)
+> SET token abc PX 60000
+OK
+> SET token abc EXAT 1893456000
+OK           # 절대 UNIX 초 (PXAT=밀리초)
+> SET token zzz NX
+(nil)        # 이미 존재 → 저장 안 함
+> SET token zzz XX
+OK           # 있을 때만 덮어씀
+> SET token yyy KEEPTTL
+OK           # 값만 바꾸고 TTL 유지
+> SET token new GET
+"yyy"        # 이전 값 반환하며 교체
+> TTL token
+(integer) 60
+```
+
+> **주의** — Redis는 정수를 넣어도 **내부적으로는 문자열**로 저장한다. 꺼낼 때 숫자 연산이 필요하면 애플리케이션에서 파싱해야 한다.
+
+## MSET · INCR — 라운드트립과 원자성
+
+*도입: Redis 1.0+* · "GET 해서 +1 하고 SET" 대신 `INCR` 하나면 되는 이유.
+
+### ① INCR이 없다면 — 성능 저하
+
+<Figure caption="연산을 위해 네트워크 IO가 한 번 더 들면 느리다 — INCR은 왕복 1회로 끝낸다">
+  <svg viewBox="0 0 760 230" role="img" aria-label="INCR 없이 GET-SET 하면 왕복 2회, INCR이면 1회">
+    <text x="20" y="24" fontSize="12" fontWeight="700" fill="#ff7a70">Without INCR — 왕복 2회</text>
+    <rect x="20" y="40" width="120" height="90" rx="10" fill="var(--bg-subtle)" stroke="var(--border)" /><text x="80" y="90" textAnchor="middle" fontSize="12" fontWeight="600" fill="var(--text)">API Server</text>
+    <g fontFamily="ui-monospace, monospace" fontSize="10.5">
+      <path d="M145 60 L300 60" stroke="var(--text-subtle)" markerEnd="url(#incrG1)" /><text x="222" y="54" textAnchor="middle" fill="var(--text-muted)">GET visit_cnt</text>
+      <path d="M300 78 L145 78" stroke="var(--text-subtle)" markerEnd="url(#incrG1)" /><text x="222" y="93" textAnchor="middle" fill="var(--text-subtle)">"1000"</text>
+      <path d="M145 100 L300 100" stroke="var(--text-subtle)" markerEnd="url(#incrG1)" /><text x="222" y="115" textAnchor="middle" fill="var(--text-muted)">SET visit_cnt 1001</text>
+    </g>
+    <g fill="#ff4d40"><path d="M305 55 L350 70 L305 85 L260 70 Z" opacity=".9" /><path d="M260 88 L305 103 L350 88 L350 96 L305 111 L260 96 Z" opacity=".55" /></g>
+    <text x="430" y="24" fontSize="12" fontWeight="700" fill="#33d6c0">With INCR — 왕복 1회</text>
+    <rect x="430" y="40" width="120" height="90" rx="10" fill="var(--bg-subtle)" stroke="var(--border)" /><text x="490" y="90" textAnchor="middle" fontSize="12" fontWeight="600" fill="var(--text)">API Server</text>
+    <g fontFamily="ui-monospace, monospace" fontSize="10.5">
+      <path d="M555 70 L700 70" stroke="#33d6c0" markerEnd="url(#incrG2)" /><text x="630" y="64" textAnchor="middle" fill="#33d6c0">INCR visit_cnt</text>
+      <path d="M700 92 L555 92" stroke="#33d6c0" markerEnd="url(#incrG2)" /><text x="630" y="107" textAnchor="middle" fill="var(--text-subtle)">"1001"</text>
+    </g>
+    <g fill="#ff4d40"><path d="M705 55 L750 70 L705 85 L660 70 Z" opacity=".9" /><path d="M660 88 L705 103 L750 88 L750 96 L705 111 L660 96 Z" opacity=".55" /></g>
+    <text x="222" y="160" textAnchor="middle" fontSize="11" fill="var(--text-muted)">연산을 위해 네트워크 IO가 한 번 더 → 느림</text>
+    <text x="630" y="160" textAnchor="middle" fontSize="11" fill="var(--text-muted)">서버가 증가까지 처리 → 빠름</text>
+    <defs>
+      <marker id="incrG1" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="var(--text-subtle)" /></marker>
+      <marker id="incrG2" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="#33d6c0" /></marker>
+    </defs>
+  </svg>
+</Figure>
+
+### ② INCR이 없다면 — 안전하지 않음
+
+요청이 많은 서버가 둘이라면, 둘 다 `GET → "1000"`을 읽고 각자 `SET 1001`을 쓴다. 실제로는 2 증가해야 하는데 **1만 증가하고 값이 덮어쓰기(lost update)** 된다. `INCR`은 이 전 과정을 원자적으로 묶어 경쟁 조건을 없앤다.
+
+- **MSET / MGET** — 여러 키를 **한 번에** 쓰고 읽음 → SET·GET 반복보다 왕복 횟수 격감.
+- **INCR / DECR** — 정수값을 원자적으로 ±1. `INCR visits`
+- **INCRBY / DECRBY** — 지정한 정수만큼 증감. `INCRBY mycounter 5`
+
+```bash filename="redis-cli"
+> MSET k1 1000 k2 2000 k3 3000
+OK
+> MGET k1 k2 k3
+1) "1000"
+2) "2000"
+3) "3000"
+> SET visits 100
+OK
+> INCR visits
+(integer) 101
+> INCRBY visits 5
+(integer) 106
+> DECR visits
+(integer) 105
+> DECRBY visits 5
+(integer) 100
+```
+
+## Hash — 필드-값 맵 (객체 표현)
+
+*도입: Redis 2.0+* · 다른 언어의 **dictionary / map**과 같다. 여러 속성을 가진 객체를 키 하나로 묶어 저장·조회.
+
+<Figure caption="user 키 아래 name/username/age 필드를 가진 해시">
+  <svg viewBox="0 0 620 190" role="img" aria-label="user 키 아래 필드를 가진 해시">
+    <rect x="20" y="75" width="110" height="44" rx="9" fill="#1f6feb22" stroke="#33d6c0" /><text x="75" y="102" textAnchor="middle" fontSize="14" fontWeight="700" fill="#33d6c0">user</text>
+    <path d="M130 97 L185 97" stroke="var(--text-subtle)" markerEnd="url(#hashHh)" />
+    <g fontSize="12">
+      <rect x="190" y="30" width="190" height="38" rx="7" fill="var(--bg-muted)" stroke="var(--border)" /><text x="205" y="54" fontFamily="ui-monospace, monospace" fill="#ff7a70">name</text><text x="365" y="54" textAnchor="end" fill="var(--text)">Joon</text>
+      <rect x="190" y="76" width="190" height="38" rx="7" fill="var(--bg-muted)" stroke="var(--border)" /><text x="205" y="100" fontFamily="ui-monospace, monospace" fill="#ff7a70">username</text><text x="365" y="100" textAnchor="end" fill="var(--text)">mke</text>
+      <rect x="190" y="122" width="190" height="38" rx="7" fill="var(--bg-muted)" stroke="var(--border)" /><text x="205" y="146" fontFamily="ui-monospace, monospace" fill="#ff7a70">age</text><text x="365" y="146" textAnchor="end" fill="var(--text)">30</text>
+    </g>
+    <text x="490" y="88" textAnchor="middle" fontSize="11" fontFamily="ui-monospace, monospace" fill="var(--text-muted)">HSET user</text>
+    <text x="490" y="106" textAnchor="middle" fontSize="11" fontFamily="ui-monospace, monospace" fill="var(--text-muted)">name Joon ...</text>
+    <defs><marker id="hashHh" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="var(--text-subtle)" /></marker></defs>
+  </svg>
+</Figure>
+
+| 명령 | 설명 |
+|---|---|
+| `HSET / HGET` | 필드 설정 / 조회 |
+| `HDEL` | 하나 이상의 필드 삭제 |
+| `HGETALL` | 모든 필드+값 |
+| `HINCRBY` | 필드 값을 정수만큼 증가 |
+| `HKEYS / HVALS` | 모든 필드 / 모든 값 |
+| `HLEN` | 필드 개수 |
+
+```bash filename="redis-cli"
+> HSET user name Joon username mke age 30
+(integer) 3          # 새로 추가된 필드 수
+> HGET user name
+"Joon"
+> HINCRBY user age 1
+(integer) 31
+> HKEYS user
+1) "name" 2) "username" 3) "age"
+> HVALS user
+1) "Joon" 2) "mke" 3) "31"
+> HLEN user
+(integer) 3
+> HGETALL user
+1) "name"     2) "Joon"
+3) "username" 4) "mke"
+5) "age"      6) "31"
+> HDEL user username
+(integer) 1          # 삭제된 필드 수
+```
+
+> **팁** — 중첩 해시는 공식 지원이 아니다. 대신 **콜론(:)** 을 구분자로 써 `user:address`처럼 키를 계층적으로 구성하는 것이 Redis의 관용적 네이밍 컨벤션이다.
+
+## Set — 중복 없는 비순서 집합
+
+*도입: Redis 1.0+* · 해시 테이블로 구현 → 추가·삭제·존재 확인이 평균 **O(1)**. 요소가 많아도 빠르다.
+
+### 해시 테이블 내부 — "hello"는 어느 버킷으로?
+
+<Figure caption="값 입력 → 해시값 계산 → 모듈러로 버킷 위치 결정 → O(1) 조회">
+  <svg viewBox="0 0 720 210" role="img" aria-label="값을 해싱하고 버킷 인덱스를 계산">
+    <rect x="20" y="80" width="90" height="40" rx="8" fill="#7d181233" stroke="#ff4d40" /><text x="65" y="105" textAnchor="middle" fontSize="13" fontFamily="ui-monospace, monospace" fill="var(--text)">"hello"</text>
+    <path d="M110 100 L160 100" stroke="var(--text-subtle)" markerEnd="url(#setSh)" />
+    <rect x="160" y="80" width="130" height="40" rx="8" fill="var(--bg-muted)" stroke="#9d8bff" /><text x="225" y="105" textAnchor="middle" fontSize="12" fill="#9d8bff">MurmurHash2</text>
+    <path d="M290 100 L340 100" stroke="var(--text-subtle)" markerEnd="url(#setSh)" />
+    <rect x="340" y="72" width="160" height="26" rx="6" fill="var(--bg-muted)" stroke="var(--border)" /><text x="350" y="90" fontSize="11" fontFamily="ui-monospace, monospace" fill="var(--text-muted)">해시값 2834237</text>
+    <rect x="340" y="104" width="160" height="26" rx="6" fill="var(--bg-muted)" stroke="var(--border)" /><text x="350" y="122" fontSize="11" fontFamily="ui-monospace, monospace" fill="var(--text-muted)">2834237 % 8 = 5</text>
+    <g transform="translate(540,55)">
+      <text x="50" y="-8" textAnchor="middle" fontSize="11" fill="var(--text-subtle)">buckets[8]</text>
+      <g fontSize="11" fontFamily="ui-monospace, monospace">
+        <rect x="0" y="0" width="100" height="16" fill="var(--bg-muted)" stroke="var(--border)" /><text x="6" y="12" fill="var(--text-subtle)">0</text>
+        <rect x="0" y="16" width="100" height="16" fill="var(--bg-muted)" stroke="var(--border)" /><text x="6" y="28" fill="var(--text-subtle)">1</text>
+        <rect x="0" y="32" width="100" height="16" fill="var(--bg-muted)" stroke="var(--border)" /><text x="6" y="44" fill="var(--text-subtle)">2..4</text>
+        <rect x="0" y="48" width="100" height="16" fill="#0e4d46" stroke="#33d6c0" /><text x="6" y="60" fill="#33d6c0">5 → "hello"</text>
+        <rect x="0" y="64" width="100" height="16" fill="var(--bg-muted)" stroke="var(--border)" /><text x="6" y="76" fill="var(--text-subtle)">6..7</text>
+      </g>
+    </g>
+    <defs><marker id="setSh" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="var(--text-subtle)" /></marker></defs>
+  </svg>
+</Figure>
+
+| 명령 | 설명 |
+|---|---|
+| `SADD / SREM` | 요소 추가 / 제거 |
+| `SISMEMBER` | 요소 포함 여부 |
+| `SMEMBERS / SCARD` | 전체 요소 / 개수 |
+| `SINTER · SUNION · SDIFF` | 교집합 · 합집합 · 차집합 |
+| `SINTERSTORE · SUNIONSTORE · SDIFFSTORE` | 연산 결과를 새 Set에 저장 |
+
+```bash filename="redis-cli"
+> SADD set1 1 2 3 4
+(integer) 4
+> SADD set2 3 4 5 6
+(integer) 4
+> SADD set1 3
+(integer) 0          # 중복 → 추가 안 됨
+> SISMEMBER set1 3
+(integer) 1          # 1=있음, 0=없음
+> SMEMBERS set1
+1) "1" 2) "2" 3) "3" 4) "4"
+> SCARD set1
+(integer) 4          # 요소 개수
+> SINTER set1 set2
+1) "3" 2) "4"        # 교집합
+> SUNION set1 set2
+1) "1" 2) "2" 3) "3" 4) "4" 5) "5" 6) "6"
+> SDIFF set1 set2
+1) "1" 2) "2"        # set1에만 있는 것
+> SINTERSTORE dst set1 set2
+(integer) 2          # 결과를 dst에 저장
+> SUNIONSTORE dst set1 set2
+(integer) 6
+> SDIFFSTORE dst set1 set2
+(integer) 2
+> SREM set1 1
+(integer) 1          # 제거된 개수
+```
+
+## Sorted Set — score로 정렬되는 집합
+
+*도입: Redis 1.2+* · 각 멤버에 **score**가 붙고, 그 점수로 자동 정렬된다. 점수 기반 빠른 조회와 범위 쿼리가 강점 → **리더보드**의 정석.
+
+### 내부 구조 — Hash Table + Skip List
+
+<Figure caption="멤버→점수 조회는 해시테이블(O(1)), 점수순 정렬·범위는 스킵리스트(O(log N))가 담당">
+  <svg viewBox="0 0 720 220" role="img" aria-label="Sorted Set은 해시테이블과 스킵리스트를 함께 사용">
+    <text x="120" y="24" textAnchor="middle" fontSize="12" fontWeight="700" fill="#9d8bff">Hash Table — member→score</text>
+    <g fontSize="11.5" fontFamily="ui-monospace, monospace">
+      <rect x="20" y="38" width="200" height="28" rx="6" fill="var(--bg-muted)" stroke="var(--border)" /><text x="32" y="57" fill="var(--text)">user1 → <tspan fill="#33d6c0">100</tspan></text>
+      <rect x="20" y="70" width="200" height="28" rx="6" fill="var(--bg-muted)" stroke="var(--border)" /><text x="32" y="89" fill="var(--text)">user3 → <tspan fill="#33d6c0">150</tspan></text>
+      <rect x="20" y="102" width="200" height="28" rx="6" fill="var(--bg-muted)" stroke="var(--border)" /><text x="32" y="121" fill="var(--text)">user2 → <tspan fill="#33d6c0">200</tspan></text>
+    </g>
+    <text x="500" y="24" textAnchor="middle" fontSize="12" fontWeight="700" fill="#33d6c0">Skip List — score 정렬</text>
+    <g fontFamily="ui-monospace, monospace" fontSize="10.5">
+      <line x1="300" y1="120" x2="700" y2="120" stroke="var(--border)" />
+      <line x1="300" y1="90" x2="560" y2="90" stroke="#33d6c0" opacity=".5" strokeDasharray="3 3" />
+      <line x1="300" y1="60" x2="700" y2="60" stroke="#33d6c0" opacity=".3" strokeDasharray="3 3" />
+      <circle cx="300" cy="120" r="5" fill="var(--text-subtle)" /><text x="300" y="140" textAnchor="middle" fill="var(--text-subtle)">HEAD</text>
+      <circle cx="400" cy="120" r="6" fill="#33d6c0" /><text x="400" y="140" textAnchor="middle" fill="var(--text-muted)">u1:100</text>
+      <circle cx="500" cy="120" r="6" fill="#33d6c0" /><text x="500" y="140" textAnchor="middle" fill="var(--text-muted)">u3:150</text>
+      <circle cx="600" cy="120" r="6" fill="#33d6c0" /><text x="600" y="140" textAnchor="middle" fill="var(--text-muted)">u2:200</text>
+      <circle cx="700" cy="120" r="5" fill="var(--text-subtle)" /><text x="700" y="140" textAnchor="middle" fill="var(--text-subtle)">TAIL</text>
+    </g>
+    <text x="500" y="175" textAnchor="middle" fontSize="11" fill="var(--text-muted)">O(log N) 삽입·삭제·범위 쿼리 · 점수 같으면 사전순</text>
+  </svg>
+</Figure>
+
+| 명령 | 설명 |
+|---|---|
+| `ZADD / ZREM` | 멤버+점수 추가 / 제거 |
+| `ZSCORE / ZCARD` | 멤버 점수 / 전체 개수 |
+| `ZRANGE` | 순위 범위로 멤버 조회 |
+| `ZRANGEBYSCORE` | 점수 범위로 조회 |
+| `ZCOUNT` | 점수 범위 내 멤버 수 |
+| `ZINCRBY` | 멤버 점수 증가 |
+| `ZPOPMIN / ZPOPMAX` | 최저 / 최고 점수 멤버 추출 |
+
+```bash filename="redis-cli · 리더보드"
+> ZADD board 100 Alice 200 Bob 150 Carol
+(integer) 3
+> ZSCORE board Bob
+"200"
+> ZCARD board
+(integer) 3
+> ZRANGE board 0 -1 WITHSCORES
+1) "Alice" 2) "100"
+3) "Carol" 4) "150"
+5) "Bob"   6) "200"   # 점수 오름차순
+> ZRANGEBYSCORE board 120 200
+1) "Carol" 2) "Bob"   # 점수 120~200
+> ZCOUNT board 120 200
+(integer) 2
+> ZINCRBY board 120 Alice
+"220"          # Alice 100→220, 1위로
+> ZPOPMAX board
+1) "Alice" 2) "220"   # 최고 점수 추출
+> ZPOPMIN board
+1) "Carol" 2) "150"   # 최저 점수 추출
+> ZREM board Bob
+(integer) 1          # 멤버 제거
+```
+
+> **팁** — 범위 경계의 `(` 접두사는 **exclusive(미만/초과)** 를 뜻한다. `ZCOUNT board 120 (200` = 120 이상 200 **미만**.
+
+## List — 삽입 순서를 가진 시퀀스
+
+*도입: Redis 1.0+* · 내부적으로 **Doubly Linked List**. 양 끝 추가/제거가 빠르다. 큐·스택·최근 항목 목록에 활용.
+
+<Figure caption="이중 연결 리스트 — 양 끝(HEAD/TAIL)에서의 추가·제거가 빠르다">
+  <svg viewBox="0 0 640 120" role="img" aria-label="이중 연결 리스트 50 60 70">
+    <rect x="40" y="40" width="120" height="44" rx="8" fill="var(--bg-muted)" stroke="var(--border)" /><text x="100" y="68" textAnchor="middle" fontSize="18" fontWeight="700" fill="var(--text)">50</text>
+    <rect x="260" y="40" width="120" height="44" rx="8" fill="var(--bg-muted)" stroke="var(--border)" /><text x="320" y="68" textAnchor="middle" fontSize="18" fontWeight="700" fill="var(--text)">60</text>
+    <rect x="480" y="40" width="120" height="44" rx="8" fill="var(--bg-muted)" stroke="var(--border)" /><text x="540" y="68" textAnchor="middle" fontSize="18" fontWeight="700" fill="var(--text)">70</text>
+    <g stroke="#ff4d40" strokeWidth="1.5">
+      <path d="M160 55 L255 55" markerEnd="url(#listLl)" /><path d="M255 69 L160 69" markerEnd="url(#listLl)" />
+      <path d="M380 55 L475 55" markerEnd="url(#listLl)" /><path d="M475 69 L380 69" markerEnd="url(#listLl)" />
+    </g>
+    <text x="100" y="105" textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="var(--text-subtle)">HEAD (L)</text>
+    <text x="540" y="105" textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="var(--text-subtle)">TAIL (R)</text>
+    <defs><marker id="listLl" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="#ff4d40" /></marker></defs>
+  </svg>
+</Figure>
+
+| 명령 | 설명 |
+|---|---|
+| `LPUSH / RPUSH` | 머리(왼쪽) / 꼬리(오른쪽)에 추가 |
+| `LPOP / RPOP` | 양 끝에서 제거+반환 |
+| `LINDEX / LRANGE` | 인덱스 조회 / 범위 조회 |
+| `LLEN` | 길이 |
+| `LPOS` | 요소 위치 (RANK·COUNT·MAXLEN 옵션) |
+| `LSET / LINSERT` | 인덱스 값 변경 / 특정 요소 앞·뒤 삽입 |
+| `LREM` | 값 제거 (0=전체, 양수=앞→뒤, 음수=뒤→앞) |
+| `LTRIM` | 지정 범위만 남기고 잘라냄 |
+
+```bash filename="redis-cli · 큐(queue)"
+> RPUSH queue a b c
+(integer) 3          # 꼬리에 추가 → [a,b,c]
+> LPUSH queue z
+(integer) 4          # 머리에 추가 → [z,a,b,c]
+> LRANGE queue 0 -1
+1) "z" 2) "a" 3) "b" 4) "c"
+> LINDEX queue 0
+"z"          # 인덱스 0의 값
+> LLEN queue
+(integer) 4
+> LPOS queue b
+(integer) 2          # "b"의 위치
+> LSET queue 1 A
+OK           # 인덱스 1을 "A"로 → [z,A,b,c]
+> LINSERT queue BEFORE b X
+(integer) 5          # [z,A,X,b,c]
+> LREM queue 1 X
+(integer) 1          # "X" 1개 제거 → [z,A,b,c]
+> LTRIM queue 1 2
+OK           # 인덱스 1~2만 남김 → [A,b]
+> LPOP queue
+"A"          # 머리에서 꺼냄
+> RPOP queue
+"b"          # 꼬리에서 꺼냄
+```
+
+## HyperLogLog (HLL)
+
+*도입: Redis 2.8.9+* · 집합의 **카디널리티(고유 개수)** 를 확률적으로 추정. 요소 수와 무관하게 **고정 12KB**.
+
+정확한 개수가 아니라 추정치를 메모리 효율과 맞바꾼다. 오차율은 약 **0.81%** — 1,000개라면 992~1,008 사이로 답한다. 정밀도가 약간 손해여도 메모리가 절대적으로 중요한 곳에 적합하다.
+
+### 왜 쓰는가 — 메모리 비교
+
+<Figure caption="Set으로 정확히 세면 요소 수에 비례해 메모리가 폭증, HLL은 10억 명도 12KB 고정">
+  <svg viewBox="0 0 720 160" role="img" aria-label="고유 방문자를 Set으로 세면 메모리 폭증, HLL은 12KB 고정">
+    <text x="20" y="22" fontSize="12" fontWeight="700" fill="#ff7a70">Set으로 정확히 세기 (16B/username)</text>
+    <g fontSize="12" fontFamily="ui-monospace, monospace">
+      <rect x="20" y="34" width="200" height="24" rx="5" fill="var(--bg-muted)" stroke="var(--border)" /><text x="30" y="51" fill="var(--text)">1,000명 → 16 KB</text>
+      <rect x="20" y="62" width="280" height="24" rx="5" fill="var(--bg-muted)" stroke="var(--border)" /><text x="30" y="79" fill="var(--text)">10^6명 → 16 MB</text>
+      <rect x="20" y="90" width="360" height="24" rx="5" fill="#7d181233" stroke="#ff4d40" /><text x="30" y="107" fill="#ff7a70">10^9명 → 16 GB 💥</text>
+    </g>
+    <text x="450" y="22" fontSize="12" fontWeight="700" fill="#33d6c0">HyperLogLog</text>
+    <rect x="450" y="40" width="120" height="74" rx="10" fill="#0e4d46" stroke="#33d6c0" />
+    <text x="510" y="78" textAnchor="middle" fontSize="22" fontWeight="800" fill="#33d6c0">12 KB</text>
+    <text x="510" y="100" textAnchor="middle" fontSize="10.5" fill="var(--text-muted)">언제나 고정</text>
+    <text x="640" y="80" textAnchor="middle" fontSize="11" fill="var(--text-muted)">10억 명도</text>
+    <text x="640" y="96" textAnchor="middle" fontSize="11" fill="var(--text-muted)">12KB</text>
+  </svg>
+</Figure>
+
+<details>
+<summary>HyperLogLog는 어떻게 12KB로 셀까? — 원리 펼쳐보기</summary>
+
+**핵심 직관 — 동전 던지기**
+
+균등 해시값을 이진수로 보면, 맨 앞에 0이 여러 번 연속으로 나오는 일은 동전 앞면이 연속으로 나오는 것과 같다. 앞면이 `k`번 연속 나오려면 평균 `2^k`번은 던져야 하듯, **선행 0이 최대 k개인 해시**를 봤다면 서로 다른 값을 대략 `2^k`개 봤다고 추정할 수 있다. 그래서 실제 값을 저장하지 않고 "지금까지 본 선행 0의 최대 개수"만 기억하면 된다.
+
+<Figure caption="요소를 해싱해 앞 비트는 버킷, 나머지는 선행 0 개수(rank)로 사용 → 레지스터에 최댓값만 유지">
+  <svg viewBox="0 0 720 180" role="img" aria-label="요소를 해싱해 버킷과 선행 0 개수를 계산">
+    <rect x="14" y="74" width="86" height="32" rx="7" fill="#7d181233" stroke="#ff4d40" /><text x="57" y="95" textAnchor="middle" fontSize="12" fontFamily="ui-monospace, monospace" fill="var(--text)">visitor7</text>
+    <path d="M100 90 L142 90" stroke="var(--text-subtle)" markerEnd="url(#hllHp)" />
+    <rect x="142" y="74" width="74" height="32" rx="7" fill="var(--bg-muted)" stroke="#9d8bff" /><text x="179" y="95" textAnchor="middle" fontSize="12" fill="#9d8bff">hash()</text>
+    <path d="M216 90 L256 90" stroke="var(--text-subtle)" markerEnd="url(#hllHp)" />
+    <g fontFamily="ui-monospace, monospace" fontSize="14">
+      <rect x="258" y="72" width="118" height="36" rx="6" fill="#0e4d46" stroke="#33d6c0" /><text x="268" y="96" fill="#33d6c0">0 1 1 0</text>
+      <rect x="380" y="72" width="200" height="36" rx="6" fill="var(--bg-muted)" stroke="var(--border)" /><text x="392" y="96" fill="var(--text-muted)">0 0 0 1 0 1 1 …</text>
+    </g>
+    <text x="317" y="128" textAnchor="middle" fontSize="10.5" fill="var(--text-subtle)">앞 p비트 → 버킷 인덱스</text>
+    <text x="480" y="128" textAnchor="middle" fontSize="10.5" fill="var(--text-subtle)">나머지 → 선행 0 = 3 → rank 4</text>
+    <g fontFamily="ui-monospace, monospace" fontSize="10">
+      <text x="600" y="60" textAnchor="middle" fill="var(--text-subtle)">레지스터 m개</text>
+      <rect x="600" y="68" width="26" height="22" fill="var(--bg-muted)" stroke="var(--border)" /><text x="613" y="83" textAnchor="middle" fill="var(--text-muted)">2</text>
+      <rect x="600" y="90" width="26" height="22" fill="#0e4d46" stroke="#33d6c0" /><text x="613" y="105" textAnchor="middle" fill="#33d6c0">4</text>
+      <rect x="600" y="112" width="26" height="22" fill="var(--bg-muted)" stroke="var(--border)" /><text x="613" y="127" textAnchor="middle" fill="var(--text-muted)">1</text>
+      <text x="660" y="105" fontSize="10" fill="var(--text-subtle)">max(기존,4)</text>
+    </g>
+    <defs><marker id="hllHp" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="var(--text-subtle)" /></marker></defs>
+  </svg>
+</Figure>
+
+**동작 4단계**
+
+1. **해싱** — 요소를 균등 해시(예: 64비트)로 바꾼다. 같은 값은 항상 같은 해시 → 중복이 저절로 흡수된다.
+2. **버킷 분배** — 해시의 앞 `p`비트로 `m = 2^p`개 레지스터 중 하나를 고른다. Redis는 `p = 14 → m = 16,384`개를 쓴다.
+3. **rank 기록** — 남은 비트에서 선행 0의 개수 + 1을 구해, 해당 레지스터의 기존 값보다 크면 갱신한다(최댓값만 유지).
+4. **추정** — m개 레지스터 값을 **조화 평균(harmonic mean)** 으로 합쳐 카디널리티를 계산한다. 이 조화평균 보정이 단순 LogLog와 HyperLogLog를 가르는 핵심으로, 큰 값 하나가 추정을 망치는 걸 막아 분산을 줄인다.
+
+**왜 12KB이고, 오차는 왜 0.81%인가**
+
+레지스터 하나는 6비트면 충분하다(64비트 해시의 선행 0은 64를 넘지 않으므로). 따라서 `16,384 × 6bit ≈ 12KB`로 **고정**된다. 표준오차는 `1.04 / √m` ≈ 0.81%. 요소가 10개든 10억 개든 메모리는 그대로다.
+
+요소가 적어 빈 레지스터가 많을 때는 추정이 부정확해지므로, 이 구간에서는 **선형 카운팅(linear counting)** 으로 자동 보정한다.
+
+</details>
+
+- **PFADD** — HLL에 요소 추가. 새 요소면 1 반환.
+- **PFCOUNT** — 고유 개수 추정치 반환.
+- **PFMERGE** — 여러 HLL을 하나로 병합(합집합 카디널리티).
+
+```bash filename="redis-cli"
+> PFADD uv visitor1 visitor2 visitor3 visitor1
+(integer) 1          # visitor1 중복은 무시됨
+> PFCOUNT uv
+(integer) 3          # 고유 3명(추정치)
+> PFADD uv2 visitor3 visitor4 visitor5
+(integer) 1
+> PFMERGE all uv uv2
+OK           # uv ∪ uv2 합집합 HLL
+> PFCOUNT all
+(integer) 5          # visitor1~5 → 고유 5명
+```
+
+> **예** — 사용 사례: 사이트 **고유 방문자(UV)**, 고유 IP, 장바구니 고유 상품 수처럼 "정확하지 않아도 되는 대규모 카운트".
+
+## Geospatial — 위치 기반 조회
+
+*도입: Redis 3.2+* · 좌표를 **geohash**로 인코딩해 Sorted Set의 score로 저장한다. 즉 Geo는 Sorted Set 위에 얹은 기능이다.
+
+<Figure caption="근처 딜러/매장 찾기 같은 위치 검색을 자료구조 하나로">
+  <svg viewBox="0 0 720 180" role="img" aria-label="중심점에서 반경 내 매장을 검색">
+    <circle cx="200" cy="90" r="70" fill="#33d6c022" stroke="#33d6c0" strokeDasharray="4 4" />
+    <circle cx="200" cy="90" r="5" fill="#ff4d40" /><text x="200" y="78" textAnchor="middle" fontSize="10" fill="#ff7a70">나</text>
+    <g fontSize="10">
+      <circle cx="160" cy="70" r="4" fill="#33d6c0" /><text x="150" y="62" fill="#33d6c0">매장A</text>
+      <circle cx="240" cy="110" r="4" fill="#33d6c0" /><text x="252" y="113" fill="#33d6c0">매장B</text>
+      <circle cx="300" cy="40" r="4" fill="var(--text-subtle)" /><text x="312" y="43" fill="var(--text-subtle)">매장C(밖)</text>
+    </g>
+    <text x="200" y="172" textAnchor="middle" fontSize="10.5" fill="var(--text-subtle)">GEOSEARCH … BYRADIUS 5 km</text>
+    <g transform="translate(420,40)">
+      <rect x="0" y="0" width="280" height="100" rx="10" fill="var(--bg-subtle)" stroke="var(--border)" />
+      <text x="16" y="28" fontSize="11" fontFamily="ui-monospace, monospace" fill="var(--text)"><tspan fill="#33d6c0">GEOADD</tspan> stores 127.0 37.5 "A"</text>
+      <text x="16" y="52" fontSize="11" fontFamily="ui-monospace, monospace" fill="var(--text)"><tspan fill="#33d6c0">GEODIST</tspan> stores "A" "B" km</text>
+      <text x="16" y="76" fontSize="11" fontFamily="ui-monospace, monospace" fill="var(--text)"><tspan fill="#33d6c0">GEOSEARCH</tspan> … FROMMEMBER "me"</text>
+    </g>
+  </svg>
+</Figure>
+
+- **GEOADD** — 경도·위도·멤버를 추가.
+- **GEODIST** — 두 멤버 간 거리(단위 지정).
+- **GEOSEARCH** — 중심·반경/사각형 내 멤버 검색(구 GEORADIUS 대체). (6.2+)
+- **GEOPOS / GEOHASH** — 멤버 좌표 / geohash 문자열 반환.
+
+```bash filename="redis-cli · 근처 매장 찾기"
+> GEOADD stores 126.978 37.566 "강남점" 127.027 37.497 "송파점"
+(integer) 2
+> GEODIST stores 강남점 송파점 km
+"9.7138"        # 두 점 사이 거리(km)
+> GEOPOS stores 강남점
+1) 1) "126.97799..."
+   2) "37.56600..."  # 경도·위도
+> GEOHASH stores 강남점
+1) "wydm9qyzd0"   # geohash 문자열
+> GEOSEARCH stores FROMMEMBER 강남점 BYRADIUS 15 km ASC
+1) "강남점"
+2) "송파점"      # 가까운 순
+```
+
+# 03 · 실행 도구
+
+## Pipeline — 여러 명령을 한 방에
+
+명령을 클라이언트에 모아 두었다가 **single shot**으로 보내고 결과를 한 번에 받는다. 네트워크 왕복(RTT)을 크게 줄인다. (특정 버전 기능이 아닌 프로토콜·클라이언트 동작)
+
+<Figure caption="Queue → Send → Process → Receive — 명령마다 응답을 기다리지 않는다">
+  <svg viewBox="0 0 700 180" role="img" aria-label="파이프라인은 큐에 명령을 모아 한 번에 전송">
+    <text x="120" y="24" textAnchor="middle" fontSize="12" fontWeight="700" fill="var(--text)">Application</text>
+    <g fontSize="11" fontFamily="ui-monospace, monospace">
+      <rect x="30" y="40" width="80" height="26" rx="6" fill="#1f6feb22" stroke="#33d6c0" /><text x="70" y="58" textAnchor="middle" fill="#33d6c0">SET</text>
+      <rect x="30" y="72" width="80" height="26" rx="6" fill="#1f6feb22" stroke="#33d6c0" /><text x="70" y="90" textAnchor="middle" fill="#33d6c0">SET</text>
+      <rect x="30" y="104" width="80" height="26" rx="6" fill="#1f6feb22" stroke="#33d6c0" /><text x="70" y="122" textAnchor="middle" fill="#33d6c0">MGET</text>
+    </g>
+    <path d="M120 85 L260 85" stroke="#33d6c0" strokeWidth="6" opacity=".5" />
+    <rect x="150" y="73" width="90" height="24" rx="4" fill="#0e4d46" /><text x="195" y="89" textAnchor="middle" fontSize="10" fontFamily="ui-monospace, monospace" fill="#33d6c0">1 batch</text>
+    <g fill="#ff4d40" transform="translate(330,40)"><path d="M0 25 L70 0 L140 25 L70 50 Z" opacity=".9" /><path d="M0 53 L70 78 L140 53 L140 63 L70 88 L0 63 Z" opacity=".55" /></g>
+    <text x="400" y="78" textAnchor="middle" fontSize="13" fontWeight="700" fill="#fff">Redis</text>
+    <text x="540" y="80" fontSize="11" fill="var(--text-muted)">큐에 쌓고 → 한 번에 전송</text>
+    <text x="540" y="98" fontSize="11" fill="var(--text-muted)">→ 서버 일괄 처리 → 결과 일괄 반환</text>
+  </svg>
+</Figure>
+
+```python filename="python · pipeline"
+pipe = r.pipeline()
+pipe.set('name', 'Alice')
+pipe.set('age', 30)
+pipe.mget(['name', 'age'])
+print(pipe.execute())   # [True, True, ['Alice', '30']]
+```
+
+## Lua 언어와 Lua Script
+
+*도입: Redis 2.6+* · 여러 명령을 **하나의 원자적 단위**로 서버에서 실행. 중간에 다른 클라이언트 명령이 끼어들 수 없다.
+
+Redis는 단일 스레드로 명령을 처리한다. 따라서 스크립트가 실행되는 동안에는 그 스크립트만 도는 셈이라, "조회 → 조건 판단 → 갱신"을 **경쟁 조건 없이** 묶을 수 있다. 동시에 클라이언트-서버 왕복도 1회로 줄어든다.
+
+- **EVAL** — 스크립트 본문 + `numkeys` + KEYS/ARGV를 넘겨 즉시 실행.
+- **SCRIPT LOAD** — 스크립트를 캐시하고 **SHA1** 해시 반환.
+- **EVALSHA** — SHA로 실행 → 매번 본문 전송 불필요(대역폭 절감).
+- **redis.call / pcall** — 스크립트 안에서 Redis 명령 호출. pcall은 에러를 잡아 반환.
+- **KEYS[] / ARGV[]** — 키와 일반 인자를 분리해 전달(클러스터 호환성).
+
+```text filename="현재 값보다 클 때만 갱신 — 원자적 (Lua)"
+-- KEYS[1]=입찰키, ARGV[1]=새 입찰가
+local cur = redis.call('GET', KEYS[1])
+if cur == false or tonumber(ARGV[1]) > tonumber(cur) then
+  redis.call('SET', KEYS[1], ARGV[1])
+  return 1
+end
+return 0
+```
+
+```bash filename="redis-cli · 위 스크립트를 EVAL로 호출"
+> SET item1 3
+OK
+> EVAL "...위 스크립트..." 1 item1 5
+(integer) 1          # 5 > 3 → 갱신 성공
+> EVAL "...위 스크립트..." 1 item1 4
+(integer) 0          # 4 < 5 → 무시
+> GET item1
+"5"
+# ── 캐시해서 SHA로 재사용 ──
+> SCRIPT LOAD "...위 스크립트..."
+"e0e1f9caab..."   # 반환된 SHA1 해시
+> EVALSHA e0e1f9caab... 1 item1 9
+(integer) 1          # 본문 재전송 없이 실행 → 9로 갱신
+```
+
+> **주의** — 스크립트가 길면 그동안 서버 전체가 블로킹된다. **짧고 빠르게** 유지할 것. Redis 7.0+에서는 재사용 로직을 `FUNCTION`(Redis Functions)으로 등록하는 방식이 권장된다.
+
+## Concurrency 문제 해결 — Lock
+
+*도입: SET NX EX · 2.6.12+* · `SET key value NX EX ttl` — 락 키가 **없을 때만** 설정하는 원자적 명령으로 임계 구역을 보호한다.
+
+예: **입찰(bidding) 서비스**. 새 입찰가가 현재가보다 클 때만 갱신해야 하는데, 여러 요청이 동시에 들어오면 경쟁이 발생한다. 먼저 락을 잡은 요청만 통과시키고 나머지는 대기시킨다.
+
+<Figure caption="NX로 단 하나의 요청만 락을 획득 → 임계 구역 직렬화 → lost update 방지">
+  <svg viewBox="0 0 720 230" role="img" aria-label="세 요청이 동시에 NX 락을 시도하지만 하나만 획득">
+    <g fontSize="11">
+      <rect x="20" y="30" width="130" height="34" rx="7" fill="#f6b74022" stroke="#f6b740" /><text x="85" y="52" textAnchor="middle" fill="#f6b740">Bid $5</text>
+      <rect x="20" y="98" width="130" height="34" rx="7" fill="#f6b74022" stroke="#f6b740" /><text x="85" y="120" textAnchor="middle" fill="#f6b740">Bid $10</text>
+      <rect x="20" y="166" width="130" height="34" rx="7" fill="#f6b74022" stroke="#f6b740" /><text x="85" y="188" textAnchor="middle" fill="#f6b740">Bid $20</text>
+    </g>
+    <g fontFamily="ui-monospace, monospace" fontSize="10">
+      <path d="M150 47 L300 100" stroke="#33d6c0" markerEnd="url(#lockLk)" /><text x="215" y="62" fill="#33d6c0">SET NX ✓</text>
+      <path d="M150 115 L300 115" stroke="var(--text-subtle)" strokeDasharray="4 3" markerEnd="url(#lockLkg)" /><text x="225" y="108" fill="var(--text-subtle)">대기…</text>
+      <path d="M150 183 L300 130" stroke="var(--text-subtle)" strokeDasharray="4 3" markerEnd="url(#lockLkg)" /><text x="215" y="170" fill="var(--text-subtle)">대기…</text>
+    </g>
+    <g fill="#ff4d40" transform="translate(320,80)"><path d="M0 25 L70 0 L140 25 L70 50 Z" opacity=".9" /><path d="M0 53 L70 78 L140 53 L140 63 L70 88 L0 63 Z" opacity=".55" /></g>
+    <text x="390" y="118" textAnchor="middle" fontSize="12" fontWeight="700" fill="#fff">item1</text>
+    <text x="390" y="170" textAnchor="middle" fontSize="11" fontFamily="ui-monospace, monospace" fill="var(--text-muted)">$3 → $5 → $20</text>
+    <g transform="translate(540,40)">
+      <text x="60" y="0" textAnchor="middle" fontSize="11" fontWeight="700" fill="var(--text-muted)">최종 결과</text>
+      <rect x="0" y="12" width="120" height="30" rx="6" fill="#0e4d46" stroke="#33d6c0" /><text x="10" y="32" fontSize="11" fontFamily="ui-monospace, monospace" fill="#33d6c0">$5 ✓</text>
+      <rect x="0" y="48" width="120" height="30" rx="6" fill="#7d181233" stroke="#ff4d40" /><text x="10" y="68" fontSize="11" fontFamily="ui-monospace, monospace" fill="#ff7a70">$10 &lt; $20 ✗</text>
+      <rect x="0" y="84" width="120" height="30" rx="6" fill="#0e4d46" stroke="#33d6c0" /><text x="10" y="104" fontSize="11" fontFamily="ui-monospace, monospace" fill="#33d6c0">$20 ✓</text>
+    </g>
+    <defs>
+      <marker id="lockLk" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="#33d6c0" /></marker>
+      <marker id="lockLkg" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="var(--text-subtle)" /></marker>
+    </defs>
+  </svg>
+</Figure>
+
+```python filename="python · simple lock"
+def acquire_lock(name, timeout=10):
+    key = f"lock:{name}"
+    while True:
+        if r.set(key, "locked", ex=timeout, nx=True):
+            return True          # 락 획득
+        time.sleep(0.1)          # 잠깐 쉬고 재시도
+```
+
+```bash filename="redis-cli · 두 요청이 경쟁"
+> SET lock:item1 locked NX EX 10
+OK           # 첫 요청: 락 획득 성공
+> SET lock:item1 locked NX EX 10
+(nil)        # 둘째 요청: 이미 존재 → 실패
+> DEL lock:item1
+(integer) 1   # 작업 끝나면 직접 해제
+```
+
+> **중요** — **TTL은 필수다.** unlock 실패로 인한 데드락을 막기 위해 락에 만료를 건다. 그리고 실전 **클러스터 환경**에서는 이 simple lock 대신 **분산 락(Redlock 알고리즘)** 을 써야 한다. 언어별 라이브러리: `redlock-py`, `Redisson`. [distributed-locks 패턴 문서](https://redis.io/docs/latest/develop/use/patterns/distributed-locks/)
+
+# 04 · 메시징 패턴
+
+## Publish / Subscribe
+
+*도입: Redis 2.0+* · 채널을 매개로 클라이언트 간 **실시간 일대다(one-to-many)** 메시징. 채팅·알림·이벤트 기반 아키텍처에 활용.
+
+<Figure caption="발행 즉시 그 채널을 구독 중인 모든 클라이언트에게 게시 순서대로 전달된다">
+  <svg viewBox="0 0 720 200" role="img" aria-label="발행자가 채널에 보내면 구독한 모든 구독자가 받음">
+    <rect x="20" y="50" width="120" height="44" rx="9" fill="#f6b74022" stroke="#f6b740" /><text x="80" y="77" textAnchor="middle" fontSize="12" fill="#f6b740">Publisher</text>
+    <path d="M140 72 L250 72" stroke="var(--text-subtle)" markerEnd="url(#pubPs)" />
+    <rect x="250" y="50" width="130" height="44" rx="9" fill="#1f6feb22" stroke="#33d6c0" /><text x="315" y="77" textAnchor="middle" fontSize="12" fill="#33d6c0">Channel: news</text>
+    <g>
+      <path d="M380 60 L490 35" stroke="var(--text-subtle)" markerEnd="url(#pubPs)" />
+      <path d="M380 72 L490 95" stroke="var(--text-subtle)" markerEnd="url(#pubPs)" />
+      <path d="M380 84 L490 155" stroke="var(--text-subtle)" markerEnd="url(#pubPs)" />
+    </g>
+    <g fontSize="11">
+      <rect x="490" y="18" width="130" height="36" rx="8" fill="#7d181233" stroke="#ff4d40" /><text x="555" y="40" textAnchor="middle" fill="#ff7a70">Subscriber A</text>
+      <rect x="490" y="78" width="130" height="36" rx="8" fill="#7d181233" stroke="#ff4d40" /><text x="555" y="100" textAnchor="middle" fill="#ff7a70">Subscriber B</text>
+      <rect x="490" y="138" width="130" height="36" rx="8" fill="#7d181233" stroke="#ff4d40" /><text x="555" y="160" textAnchor="middle" fill="#ff7a70">Subscriber C</text>
+    </g>
+    <defs><marker id="pubPs" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="var(--text-subtle)" /></marker></defs>
+  </svg>
+</Figure>
+
+- **PUBLISH** — 채널에 메시지 전송.
+- **SUBSCRIBE / UNSUBSCRIBE** — 채널 구독 / 해제.
+- **PSUBSCRIBE** — 패턴(와일드카드)으로 여러 채널 구독. P는 Pattern.
+
+```bash filename="터미널 A · 구독자"
+> SUBSCRIBE news
+Reading messages... (Ctrl-C로 종료)
+1) "subscribe"  2) "news"  3) (integer) 1
+# ↓ 아래 터미널 B에서 PUBLISH 하는 순간 실시간 도착
+1) "message"  2) "news"  3) "신차 입고!"
+> PSUBSCRIBE news.*
+1) "psubscribe"  2) "news.*"  3) (integer) 2   # 패턴 구독
+1) "pmessage"  2) "news.*"  3) "news.kor"  4) "안녕"
+> UNSUBSCRIBE news
+1) "unsubscribe"  2) "news"  3) (integer) 1    # 구독 해제
+```
+
+```bash filename="터미널 B · 발행자"
+> PUBLISH news "신차 입고!"
+(integer) 1          # 메시지를 받은 구독자 수
+> PUBLISH news.kor "안녕"
+(integer) 1          # news.* 패턴 구독자에게 전달
+```
+
+> **주의** — Redis Pub/Sub은 **과거 메시지를 저장하지 않는다(fire-and-forget)**. 구독 전에 발행된 메시지나 구독 끊긴 사이의 메시지는 받지 못한다. 영속·재처리가 필요하면 다음 절의 **Streams**로.
+
+## Streams — 영속되는 추가 전용 로그
+
+*도입: Redis 5.0+* · Pub/Sub의 약점을 메운다. 메시지가 **디스크에 남고**, **Consumer Group**으로 여러 워커가 분산 처리하며 ACK 기반으로 최소 1회(at-least-once) 전달을 보장한다.
+
+> **유사성** — 구조와 개념이 **Apache Kafka**와 유사하다. Stream≈Topic, Consumer Group≈Consumer Group, Entry ID(`ms-seq`)≈Offset, XACK≈커밋. 단일 노드 수준의 가벼운 메시지 큐가 필요할 때 Kafka 대신 검토할 수 있다.
+
+<Figure caption="스트림에 엔트리가 쌓이고 컨슈머 그룹이 나눠 처리 — 각 엔트리는 그룹 내 한 컨슈머에게만, 처리 후 XACK">
+  <svg viewBox="0 0 720 210" role="img" aria-label="스트림에 엔트리가 쌓이고 컨슈머 그룹이 나눠 처리">
+    <text x="20" y="22" fontSize="11" fontWeight="700" fill="var(--text-muted)">Stream (append-only)</text>
+    <g fontFamily="ui-monospace, monospace" fontSize="9.5">
+      <rect x="20" y="32" width="95" height="34" rx="6" fill="var(--bg-muted)" stroke="var(--border)" /><text x="28" y="46" fill="var(--text-subtle)">1700-0</text><text x="28" y="60" fill="#33d6c0">order:A</text>
+      <rect x="120" y="32" width="95" height="34" rx="6" fill="var(--bg-muted)" stroke="var(--border)" /><text x="128" y="46" fill="var(--text-subtle)">1701-0</text><text x="128" y="60" fill="#33d6c0">order:B</text>
+      <rect x="220" y="32" width="95" height="34" rx="6" fill="var(--bg-muted)" stroke="var(--border)" /><text x="228" y="46" fill="var(--text-subtle)">1702-0</text><text x="228" y="60" fill="#33d6c0">order:C</text>
+      <rect x="320" y="32" width="95" height="34" rx="6" fill="var(--bg-muted)" stroke="var(--border)" strokeDasharray="3 2" /><text x="328" y="52" fill="var(--text-subtle)">XADD *…</text>
+    </g>
+    <text x="20" y="105" fontSize="11" fontWeight="700" fill="var(--text-muted)">Consumer Group "g1"</text>
+    <g>
+      <path d="M70 66 L120 130" stroke="var(--text-subtle)" markerEnd="url(#strSt)" />
+      <path d="M170 66 L280 130" stroke="var(--text-subtle)" markerEnd="url(#strSt)" />
+      <path d="M270 66 L120 130" stroke="var(--text-subtle)" markerEnd="url(#strSt)" opacity=".4" />
+      <rect x="60" y="130" width="120" height="40" rx="8" fill="#0e4d46" stroke="#33d6c0" /><text x="120" y="155" textAnchor="middle" fontSize="11" fill="#33d6c0">consumer-1</text>
+      <rect x="220" y="130" width="120" height="40" rx="8" fill="#0e4d46" stroke="#33d6c0" /><text x="280" y="155" textAnchor="middle" fontSize="11" fill="#33d6c0">consumer-2</text>
+    </g>
+    <text x="200" y="195" textAnchor="middle" fontSize="10.5" fill="var(--text-subtle)">각 엔트리는 그룹 내 한 컨슈머에게만 → 처리 후 XACK</text>
+    <g transform="translate(470,40)">
+      <rect x="0" y="0" width="230" height="130" rx="10" fill="var(--bg-subtle)" stroke="var(--border)" />
+      <text x="115" y="24" textAnchor="middle" fontSize="11" fontWeight="700" fill="#ff7a70">vs Pub/Sub</text>
+      <text x="16" y="50" fontSize="11" fill="var(--text-muted)">· 메시지 영속 ✓ (Pub/Sub ✗)</text>
+      <text x="16" y="72" fontSize="11" fill="var(--text-muted)">· 재처리·범위 조회 ✓</text>
+      <text x="16" y="94" fontSize="11" fill="var(--text-muted)">· ACK / Pending 추적 ✓</text>
+      <text x="16" y="116" fontSize="11" fill="var(--text-muted)">· 그룹으로 부하 분산 ✓</text>
+    </g>
+    <defs><marker id="strSt" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="var(--text-subtle)" /></marker></defs>
+  </svg>
+</Figure>
+
+| 명령 | 설명 |
+|---|---|
+| `XADD key * f v` | 엔트리 추가 (*=자동 ID 생성) |
+| `XLEN / XRANGE` | 길이 / ID 범위 조회 |
+| `XREAD` | 새 엔트리 읽기 (BLOCK 가능) |
+| `XGROUP CREATE` | Consumer Group 생성 |
+| `XREADGROUP` | 그룹 소속 컨슈머로 읽기 |
+| `XACK / XPENDING` | 처리 확인 / 미확인 목록 |
+| `XCLAIM` | 죽은 컨슈머의 메시지 인계 |
+
+```bash filename="redis-cli"
+> XADD orders * item Avante qty 1
+"1718000000000-0"   # 자동 생성된 엔트리 ID
+> XADD orders * item Sonata qty 2
+"1718000000001-0"
+> XLEN orders
+(integer) 2
+> XRANGE orders - +
+1) 1) "1718000000000-0" 2) ["item","Avante",...]
+2) 1) "1718000000001-0" 2) ["item","Sonata",...]  # ID 범위 전체
+> XREAD COUNT 1 STREAMS orders 0
+1) 1) "orders" 2) 1) 1) "1718000000000-0" ...   # 그룹 없이 읽기
+> XGROUP CREATE orders g1 0
+OK
+> XREADGROUP GROUP g1 worker1 COUNT 1 STREAMS orders >
+1) 1) "orders"
+   2) 1) 1) "1718000000000-0"
+         2) 1) "item" 2) "Avante" 3) "qty" 4) "1"
+> XPENDING orders g1
+1) (integer) 1 ...   # ACK 안 된 미확인 엔트리
+> XACK orders g1 1718000000000-0
+(integer) 1          # 처리 완료 확인
+> XCLAIM orders g1 worker2 0 1718000000001-0
+1) 1) "1718000000001-0" ...   # 죽은 컨슈머 메시지를 worker2가 인계
+```
+
+# 05 · 모듈 생태계
+
+## Redis Stack이란? + Redis Insight
+
+*모듈→코어 8.0+* · Redis 코어에 **모듈**(Search·JSON·TimeSeries·Bloom)을 묶은 배포판. 코어만으로 부족한 검색·문서·시계열 기능을 더한다.
+
+<Figure caption="Redis 코어 위에 모듈들이 얹힌 스택 — Redis Insight는 키 탐색·쿼리·디버깅 GUI">
+  <svg viewBox="0 0 720 190" role="img" aria-label="Redis 코어 위에 모듈들이 얹힌 스택">
+    <rect x="60" y="130" width="600" height="44" rx="9" fill="#7d181233" stroke="#ff4d40" /><text x="360" y="158" textAnchor="middle" fontSize="14" fontWeight="700" fill="#ff7a70">Redis Core (String · Hash · Set · ZSet · List · Stream)</text>
+    <g fontSize="12">
+      <rect x="60" y="70" width="135" height="44" rx="9" fill="var(--bg-muted)" stroke="#33d6c0" /><text x="127" y="97" textAnchor="middle" fill="#33d6c0">JSON</text>
+      <rect x="205" y="70" width="135" height="44" rx="9" fill="var(--bg-muted)" stroke="#9d8bff" /><text x="272" y="97" textAnchor="middle" fill="#9d8bff">Search</text>
+      <rect x="350" y="70" width="155" height="44" rx="9" fill="var(--bg-muted)" stroke="#f6b740" /><text x="427" y="97" textAnchor="middle" fill="#f6b740">TimeSeries</text>
+      <rect x="515" y="70" width="145" height="44" rx="9" fill="var(--bg-muted)" stroke="#33d6c0" /><text x="587" y="97" textAnchor="middle" fill="#33d6c0">Bloom</text>
+    </g>
+    <text x="360" y="40" textAnchor="middle" fontSize="12" fontWeight="700" fill="var(--text-muted)">Redis Insight — GUI로 키 탐색·쿼리·디버깅</text>
+  </svg>
+</Figure>
+
+> **중요 — 모듈의 코어 통합** — **Redis 8.0(2025)** 부터 Redis Stack과 Community Edition이 단일 배포판 **Redis Open Source**로 합쳐졌다. RediSearch·RedisJSON·RedisTimeSeries·RedisBloom을 더 이상 별도 모듈로 설치할 필요 없이 코어에 내장된다(확률적 구조 5종 + Vector set[베타] 포함). 별도 Redis Stack 배포(6.2·7.2·7.4)의 유지보수는 2025년 12월 종료됐다. 따라서 **Redis 8 이상이면 Stack 모듈을 따로 신경 쓸 필요가 없다.** 한편 **Redis Insight**는 키를 시각적으로 둘러보고 명령을 실행·프로파일링하는 공식 GUI다.
+
+## RedisJSON & RediSearch
+
+*모듈→코어 8.0+* · JSON을 네이티브로 저장·부분 수정하고, 그 위에 **2차 인덱스·전문 검색**을 건다. 흔히 짝으로 쓴다.
+
+**RedisJSON**
+
+- **JSON.SET** — JSONPath(`$.user.name`)로 경로 지정 저장.
+- **JSON.GET** — 문서 전체 또는 특정 경로만 조회.
+- **JSON.ARRAPPEND / NUMINCRBY** — 배열·숫자 필드를 **부분** 갱신(문서 전체 재작성 불필요).
+
+**RediSearch**
+
+- **FT.CREATE** — Hash 또는 JSON 키에 인덱스 스키마 정의.
+- **FT.SEARCH** — 전문 검색·필터·정렬. 태그·숫자·지리 필드 지원.
+- **FT.AGGREGATE** — 그룹·집계 파이프라인.
+- **VECTOR** — 벡터 필드로 KNN **유사도 검색** → RAG·시맨틱 검색의 기반.
+
+```bash filename="redis-cli"
+> JSON.SET car:1 $ '{"model":"Avante","price":2000,"tags":["used"]}'
+OK
+> JSON.GET car:1 $.price
+"[2000]"
+> JSON.NUMINCRBY car:1 $.price 100
+"[2100]"      # 숫자 필드 부분 갱신
+> JSON.ARRAPPEND car:1 $.tags '"hot"'
+1) (integer) 2   # 배열에 추가 → 길이 2
+> FT.CREATE idx ON JSON PREFIX 1 car: SCHEMA $.model AS model TEXT $.price AS price NUMERIC
+OK
+> FT.SEARCH idx "@price:[0 2500]"
+1) (integer) 1          # 조건에 맞는 문서 수
+2) "car:1"
+3) ... {"model":"Avante","price":2100,...}
+> FT.AGGREGATE idx "*" GROUPBY 1 @model REDUCE COUNT 0 AS n
+1) (integer) 1  2) 1) "model" 2) "Avante" 3) "n" 4) "1"   # 그룹 집계
+> FT.SEARCH idx "*=>[KNN 3 @vec $q]" PARAMS 2 q "..."
+... 벡터 유사도 상위 3건   # VECTOR 필드 KNN 검색(RAG 기반)
+```
+
+## RedisTimeSeries
+
+*모듈→코어 8.0+* · 타임스탬프-값 쌍에 최적화된 시계열 자료구조. **다운샘플링·보존기간·레이블**을 내장.
+
+<Figure caption="시계열 데이터 포인트 — avg / 1m 룰로 자동 집계(다운샘플)">
+  <svg viewBox="0 0 720 150" role="img" aria-label="시계열 데이터 포인트와 다운샘플링">
+    <line x1="40" y1="110" x2="680" y2="110" stroke="var(--border)" />
+    <polyline points="40,90 120,70 200,95 280,55 360,80 440,45 520,75 600,40 660,60" fill="none" stroke="#f6b740" strokeWidth="2" />
+    <g fill="#f6b740">
+      <circle cx="40" cy="90" r="3" /><circle cx="120" cy="70" r="3" /><circle cx="200" cy="95" r="3" /><circle cx="280" cy="55" r="3" /><circle cx="360" cy="80" r="3" /><circle cx="440" cy="45" r="3" /><circle cx="520" cy="75" r="3" /><circle cx="600" cy="40" r="3" />
+    </g>
+    <text x="40" y="135" fontSize="10" fontFamily="ui-monospace, monospace" fill="var(--text-subtle)">t→ (ts:metric)</text>
+    <text x="640" y="30" fontSize="10" fill="var(--text-muted)">avg / 1m 룰로 자동 집계</text>
+  </svg>
+</Figure>
+
+- **TS.CREATE** — 시계열 생성. RETENTION(보존), LABELS(메타) 지정.
+- **TS.ADD** — 타임스탬프-값 추가.
+- **TS.RANGE / TS.MRANGE** — 단일 / 레이블 매칭 다중 시계열 범위 조회.
+- **Compaction Rule** — 원본을 avg·max 등으로 다운샘플해 별도 시계열에 자동 적재.
+
+```bash filename="redis-cli"
+> TS.CREATE temp RETENTION 86400000 LABELS sensor 1
+OK
+> TS.ADD temp * 21.5
+1718000000000     # 기록된 타임스탬프
+> TS.ADD temp * 22.1
+1718000060000
+> TS.RANGE temp - +
+1) 1) (integer) 1718000000000  2) 21.5
+2) 1) (integer) 1718000060000  2) 22.1
+> TS.CREATE temp_avg
+OK
+> TS.CREATERULE temp temp_avg AGGREGATION avg 60000
+OK           # Compaction: 1분 평균으로 자동 다운샘플
+> TS.MRANGE - + FILTER sensor=1
+1) 1) "temp" 2) [...] 3) [...]   # 레이블 매칭 다중 시계열 조회
+```
+
+> **예** — 사용 사례: 서버 메트릭(관측성), IoT 센서, 가격 추이. **Prometheus·Grafana** 같은 모니터링 스택과 결이 맞는다.
+
+## RedisBloom
+
+*모듈→코어 8.0+* · 확률적 자료구조 모음. 대표는 **Bloom Filter** — "이 값을 본 적 있나?"를 아주 적은 메모리로 답한다.
+
+> **핵심 성질** — "있다"는 **거짓 양성(false positive)이 가능**하지만, "없다"는 **항상 정확(false negative 없음)**. 즉 없다고 하면 확실히 없다.
+
+- **BF.ADD / BF.EXISTS** — Bloom Filter에 추가 / 존재 가능성 확인.
+- **CF.*** — Cuckoo Filter — 삭제 가능한 확률적 집합.
+- **CMS.*** — Count-Min Sketch — 빈도수 근사 카운팅.
+- **TOPK.*** — Top-K — 가장 많이 등장한 K개 추적.
+
+```bash filename="redis-cli"
+> BF.ADD emails alice@x.com
+(integer) 1          # 새로 추가됨
+> BF.EXISTS emails alice@x.com
+(integer) 1          # 있을 수 있음(false positive 가능)
+> BF.EXISTS emails bob@x.com
+(integer) 0          # 확실히 없음(절대 틀리지 않음)
+# ── Cuckoo Filter (삭제 가능) ──
+> CF.ADD seen item1
+(integer) 1
+> CF.EXISTS seen item1
+(integer) 1
+# ── Count-Min Sketch (빈도 근사) ──
+> CMS.INITBYPROB freq 0.001 0.01
+OK
+> CMS.INCRBY freq page:home 5
+1) (integer) 5
+> CMS.QUERY freq page:home
+1) (integer) 5      # 근사 빈도
+# ── Top-K (상위 K개) ──
+> TOPK.RESERVE hot 3
+OK           # 상위 3개 추적
+> TOPK.ADD hot a b a c a
+1) (nil) ...
+> TOPK.LIST hot
+1) "a" 2) "b" 3) "c"
+```
+
+> **예** — 사용 사례: 가입 이메일 중복 1차 체크, **캐시 침투(cache penetration) 방어**, 추천에서 "이미 본 콘텐츠" 제외.
+
+## RedisGraph
+
+*모듈 · 2023 EOL* · 노드-관계로 데이터를 표현하는 그래프 DB 모듈. **Cypher** 쿼리 언어를 사용했다.
+
+<Figure caption='GRAPH.QUERY g "MATCH (u:User)-[:BOUGHT]->(c:Car) RETURN u, c"'>
+  <svg viewBox="0 0 640 150" role="img" aria-label="사용자-구매-상품 그래프">
+    <circle cx="120" cy="75" r="30" fill="#1f6feb22" stroke="#33d6c0" /><text x="120" y="80" textAnchor="middle" fontSize="11" fill="#33d6c0">User</text>
+    <circle cx="320" cy="75" r="30" fill="#7d181233" stroke="#ff4d40" /><text x="320" y="80" textAnchor="middle" fontSize="11" fill="#ff7a70">Car</text>
+    <circle cx="520" cy="75" r="30" fill="var(--bg-muted)" stroke="#9d8bff" /><text x="520" y="80" textAnchor="middle" fontSize="11" fill="#9d8bff">Dealer</text>
+    <g fontFamily="ui-monospace, monospace" fontSize="10">
+      <path d="M150 75 L290 75" stroke="var(--text-subtle)" markerEnd="url(#graphGr)" /><text x="220" y="68" textAnchor="middle" fill="var(--text-muted)">:BOUGHT</text>
+      <path d="M350 75 L490 75" stroke="var(--text-subtle)" markerEnd="url(#graphGr)" /><text x="420" y="68" textAnchor="middle" fill="var(--text-muted)">:SOLD_BY</text>
+    </g>
+    <defs><marker id="graphGr" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="var(--text-subtle)" /></marker></defs>
+  </svg>
+</Figure>
+
+```bash filename="redis-cli · Cypher 쿼리"
+> GRAPH.QUERY cars "CREATE (:User {name:'Joon'})-[:BOUGHT]->(:Car {model:'Avante'})"
+1) 1) "Nodes created: 2"
+   2) "Relationships created: 1"
+> GRAPH.QUERY cars "MATCH (u:User)-[:BOUGHT]->(c:Car) RETURN u.name, c.model"
+1) 1) "u.name"  2) "c.model"
+2) 1) 1) "Joon"  2) "Avante"
+```
+
+> **중요 — 현황 체크** — RedisGraph 모듈은 **지원이 종료(EOL)** 되었다(2023년 발표, 이후 신규 개발 중단). 강의 학습용 개념으로는 유효하지만, **신규 프로젝트에 도입하지 말 것.** 그래프 워크로드가 필요하면 Neo4j, Amazon Neptune 등 현역 그래프 DB를 검토하는 편이 안전하다.
