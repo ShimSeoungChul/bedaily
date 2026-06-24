@@ -1,0 +1,428 @@
+---
+title: "Spring Data JPA 3 × Hibernate 6 — 명세와 구현체로 읽는 영속성 아키텍처"
+date: "2026-06-25"
+category: "Java"
+tags: ["JPA", "Hibernate", "Spring Data JPA", "영속성", "ORM"]
+summary: "JPA는 명세, Hibernate는 구현체입니다. 같은 무대를 두 이름으로 부르는 두 층을 나란히 놓고 전체 스택·런타임 구조·엔티티 생명주기·영속성 컨텍스트·flush·키 생성·N+1·2차 캐시·쿼리 계층·메서드 대응까지 다이어그램으로 정리합니다. 기준은 Spring Data JPA 3 / Hibernate 6."
+published: true
+---
+
+## 개요
+
+명세와 구현체. 같은 무대를 두 이름으로 부르는 두 층을 나란히 놓고, 어디가 표준이고 어디가 Hibernate가 얹은 것인지 구분해 읽는 글이다. 기준은 **Spring Data JPA 3 / Hibernate 6** — JPA 4 / Hibernate 7은 별도로 다룬다.
+
+아래 다이어그램에서 색은 두 층을 가른다.
+
+- **청록(teal)** — JPA: 명세 / 표준 (Jakarta Persistence)
+- **앰버(amber)** — Hibernate: 구현체 (ORM Provider)
+
+## 전체 스택 — 어디에 무엇이 있나
+
+세 가지는 대체 관계가 아니라 층층이 쌓이는 관계다. 호출은 위에서 아래로 흐르고, 각 층은 바로 아래 층에만 의존한다. JPA 층(청록)은 규약일 뿐 실행 코드가 없고, 실제 SQL을 만들고 던지는 일은 Hibernate 층(앰버)이 한다.
+
+<Figure caption="호출 흐름 — JPA는 규칙, Hibernate는 그 규칙을 따르는 엔진">
+  <svg viewBox="0 0 760 430" fontFamily="ui-monospace, monospace" role="img" aria-label="Spring Data JPA / JPA / Hibernate 스택 호출 흐름">
+    <defs>
+      <linearGradient id="gJpa" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#56c7d6" stopOpacity=".18" /><stop offset="1" stopColor="#56c7d6" stopOpacity=".05" /></linearGradient>
+      <linearGradient id="gHb" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#e8a85c" stopOpacity=".18" /><stop offset="1" stopColor="#e8a85c" stopOpacity=".05" /></linearGradient>
+      <marker id="stackArr" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="var(--text-subtle)" /></marker>
+    </defs>
+    <rect x="170" y="14" width="420" height="50" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="380" y="38" fill="var(--text)" fontSize="14" textAnchor="middle" fontWeight="600">내 코드</text>
+    <text x="380" y="55" fill="var(--text-subtle)" fontSize="11" textAnchor="middle">Repository 호출 · Service 로직</text>
+    <rect x="120" y="86" width="520" height="50" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="380" y="110" fill="var(--text)" fontSize="14" textAnchor="middle" fontWeight="600">Spring Data JPA</text>
+    <text x="380" y="127" fill="var(--text-subtle)" fontSize="11" textAnchor="middle">JpaRepository · 메서드 쿼리 · 보일러플레이트 제거</text>
+    <rect x="120" y="158" width="520" height="58" rx="9" fill="url(#gJpa)" stroke="#56c7d6" strokeOpacity=".55" />
+    <text x="380" y="183" fill="#56c7d6" fontSize="14" textAnchor="middle" fontWeight="600">JPA (명세 · 인터페이스)</text>
+    <text x="380" y="201" fill="var(--text-muted)" fontSize="11" textAnchor="middle">EntityManager · @Entity · JPQL — 규약만 정의, 실행 코드 없음</text>
+    <rect x="120" y="238" width="520" height="58" rx="9" fill="url(#gHb)" stroke="#e8a85c" strokeOpacity=".55" />
+    <text x="380" y="263" fill="#e8a85c" fontSize="14" textAnchor="middle" fontWeight="600">Hibernate (구현체 · Provider)</text>
+    <text x="380" y="281" fill="var(--text-muted)" fontSize="11" textAnchor="middle">Session · 실제 SQL 생성 · 1차 캐시 · dirty checking 실행</text>
+    <rect x="170" y="318" width="420" height="46" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="380" y="346" fill="var(--text)" fontSize="13" textAnchor="middle" fontWeight="600">JDBC</text>
+    <rect x="240" y="386" width="280" height="34" rx="9" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="380" y="408" fill="var(--text-muted)" fontSize="13" textAnchor="middle">Database</text>
+    <g stroke="var(--text-subtle)" strokeWidth="1.4">
+      <line x1="380" y1="64" x2="380" y2="84" markerEnd="url(#stackArr)" />
+      <line x1="380" y1="136" x2="380" y2="156" markerEnd="url(#stackArr)" />
+      <line x1="380" y1="216" x2="380" y2="236" markerEnd="url(#stackArr)" />
+      <line x1="380" y1="296" x2="380" y2="316" markerEnd="url(#stackArr)" />
+      <line x1="380" y1="364" x2="380" y2="384" markerEnd="url(#stackArr)" />
+    </g>
+    <text x="660" y="190" fill="#56c7d6" fontSize="11" fontWeight="600">규칙</text>
+    <text x="660" y="270" fill="#e8a85c" fontSize="11" fontWeight="600">엔진</text>
+  </svg>
+</Figure>
+
+- **JPA** *(명세)* — 명세일 뿐 동작 코드가 없다. 인터페이스와 애너테이션의 규약만 정의한다. 단독으로는 아무것도 못 돌린다.
+- **Hibernate** *(구현체)* — JPA 명세를 구현한 가장 널리 쓰이는 provider. 표준 인터페이스를 제공하면서 표준을 넘어서는 고유 기능도 함께 가진다.
+- **Spring Data JPA** — JPA를 대체하지 않고 그 위에 얹는 추상화. `JpaRepository.save()`는 내부에서 상태를 보고 표준 메서드를 고르는, 아래 Hibernate 메서드와는 전혀 다른 물건이다.
+
+## 핵심 런타임 구조와 명칭 대응
+
+JPA가 정의한 표준 타입은 Hibernate에서 다른 이름의 구현 타입으로 존재한다. Hibernate의 `Session`은 JPA의 `EntityManager`를 *구현(확장)* 한 것 — 표준 개념을 소유한 게 아니라 구현한 쪽이다.
+
+<Figure caption="표준 타입 ↔ 구현 타입 — 화살표는 implements / extends">
+  <svg viewBox="0 0 760 320" fontFamily="ui-monospace, monospace" role="img" aria-label="JPA 표준 타입과 Hibernate 구현 타입 대응">
+    <defs><marker id="rtArr" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="var(--text-subtle)" /></marker></defs>
+    <text x="190" y="28" fill="#56c7d6" fontSize="13" textAnchor="middle" fontWeight="700">JPA 표준 (명세)</text>
+    <text x="570" y="28" fill="#e8a85c" fontSize="13" textAnchor="middle" fontWeight="700">Hibernate (구현)</text>
+    <line x1="380" y1="42" x2="380" y2="300" stroke="var(--border)" strokeDasharray="3 5" />
+    <rect x="60" y="56" width="260" height="56" rx="9" fill="var(--bg-muted)" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="190" y="80" fill="var(--text)" fontSize="13" textAnchor="middle" fontWeight="600">EntityManagerFactory</text>
+    <text x="190" y="98" fill="var(--text-subtle)" fontSize="10.5" textAnchor="middle">앱당 1개 · 무겁다 · thread-safe</text>
+    <rect x="440" y="56" width="260" height="56" rx="9" fill="var(--bg-muted)" stroke="#e8a85c" strokeOpacity=".5" />
+    <text x="570" y="80" fill="var(--text)" fontSize="13" textAnchor="middle" fontWeight="600">SessionFactory</text>
+    <text x="570" y="98" fill="var(--text-subtle)" fontSize="10.5" textAnchor="middle">implements EMF</text>
+    <line x1="320" y1="84" x2="438" y2="84" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#rtArr)" />
+    <line x1="190" y1="112" x2="190" y2="142" stroke="var(--border)" strokeWidth="1.3" markerEnd="url(#rtArr)" />
+    <text x="205" y="132" fill="var(--text-subtle)" fontSize="10">생성</text>
+    <line x1="570" y1="112" x2="570" y2="142" stroke="var(--border)" strokeWidth="1.3" markerEnd="url(#rtArr)" />
+    <text x="585" y="132" fill="var(--text-subtle)" fontSize="10">생성</text>
+    <rect x="60" y="146" width="260" height="56" rx="9" fill="var(--bg-muted)" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="190" y="170" fill="var(--text)" fontSize="13" textAnchor="middle" fontWeight="600">EntityManager</text>
+    <text x="190" y="188" fill="var(--text-subtle)" fontSize="10.5" textAnchor="middle">요청/작업 단위 · thread-unsafe</text>
+    <rect x="440" y="146" width="260" height="56" rx="9" fill="var(--bg-muted)" stroke="#e8a85c" strokeOpacity=".5" />
+    <text x="570" y="170" fill="var(--text)" fontSize="13" textAnchor="middle" fontWeight="600">Session</text>
+    <text x="570" y="188" fill="var(--text-subtle)" fontSize="10.5" textAnchor="middle">extends EntityManager</text>
+    <line x1="320" y1="174" x2="438" y2="174" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#rtArr)" />
+    <line x1="190" y1="202" x2="190" y2="232" stroke="var(--border)" strokeWidth="1.3" markerEnd="url(#rtArr)" />
+    <text x="205" y="222" fill="var(--text-subtle)" fontSize="10">보유</text>
+    <rect x="60" y="236" width="640" height="64" rx="9" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".4" />
+    <text x="380" y="262" fill="#56c7d6" fontSize="13" textAnchor="middle" fontWeight="700">영속성 컨텍스트 (Persistence Context)</text>
+    <text x="380" y="282" fill="var(--text-muted)" fontSize="10.5" textAnchor="middle">JPA 표준 개념 · = 1차 캐시 · EntityManager가 들고 있는 엔티티 보관소</text>
+  </svg>
+</Figure>
+
+- **EntityManagerFactory** *(JPA)* ↔ **SessionFactory** *(Hibernate)* — 앱당 하나, 무겁고 thread-safe. 부팅 시 한 번 만든다.
+- **EntityManager** *(JPA)* ↔ **Session** *(Hibernate)* — 요청/트랜잭션 단위, 가볍고 thread-unsafe. 영속성 컨텍스트를 들고 있다.
+
+> **짚어둘 점** — **영속성 컨텍스트는 JPA 표준 개념이다.** Hibernate 고유 구조가 아니다. 1차 캐시·변경 감지·쓰기 지연·엔티티 생명주기가 전부 JPA 명세에 들어 있다. Hibernate는 이 무대를 `Session` 내부의 `PersistenceContext`로 *구현* 했을 뿐이다. Hibernate 7부터 `SessionFactory.createEntityManager()`가 편의상 `Session`을 반환하는 것도 Session이 EntityManager의 상위 호환이라는 신호다.
+
+## 엔티티 생명주기 4상태
+
+JPA의 거의 모든 개념이 이 상태 전이 위에 있다. `save`/`update`/`merge` 논의도 결국 "어떤 화살표를 타느냐"의 문제였다.
+
+<Figure caption="4상태 전이 — 실선은 메서드 호출, 점선은 조회로 인한 적재">
+  <svg viewBox="0 0 760 380" fontFamily="ui-monospace, monospace" role="img" aria-label="엔티티 생명주기 Transient Managed Detached Removed">
+    <defs><marker id="lcArr" markerWidth="10" markerHeight="10" refX="6" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="var(--text-muted)" /></marker></defs>
+    <rect x="40" y="40" width="200" height="70" rx="11" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="140" y="72" fill="var(--text)" fontSize="15" textAnchor="middle" fontWeight="600">Transient</text>
+    <text x="140" y="92" fill="var(--text-subtle)" fontSize="11" textAnchor="middle">new — DB에 없음</text>
+    <rect x="280" y="40" width="200" height="70" rx="11" fill="#56c7d61f" stroke="#56c7d6" />
+    <text x="380" y="72" fill="#56c7d6" fontSize="15" textAnchor="middle" fontWeight="700">Managed</text>
+    <text x="380" y="92" fill="var(--text-muted)" fontSize="11" textAnchor="middle">컨텍스트가 추적 중</text>
+    <rect x="520" y="40" width="200" height="70" rx="11" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="620" y="72" fill="var(--text)" fontSize="15" textAnchor="middle" fontWeight="600">Detached</text>
+    <text x="620" y="92" fill="var(--text-subtle)" fontSize="11" textAnchor="middle">컨텍스트에서 분리</text>
+    <rect x="280" y="270" width="200" height="70" rx="11" fill="#e07a6b1f" stroke="#e07a6b" strokeOpacity=".6" />
+    <text x="380" y="302" fill="#e07a6b" fontSize="15" textAnchor="middle" fontWeight="600">Removed</text>
+    <text x="380" y="322" fill="var(--text-muted)" fontSize="11" textAnchor="middle">삭제 예정</text>
+    <g stroke="var(--text-muted)" strokeWidth="1.5" fill="none">
+      <path d="M240,66 L278,66" markerEnd="url(#lcArr)" />
+      <path d="M480,82 L518,82" markerEnd="url(#lcArr)" />
+      <path d="M518,60 L482,60" markerEnd="url(#lcArr)" />
+      <path d="M380,110 L380,268" markerEnd="url(#lcArr)" />
+      <path d="M380,150 C300,180 300,40 376,40" markerEnd="url(#lcArr)" strokeDasharray="4 4" />
+    </g>
+    <text x="259" y="58" fill="#56c7d6" fontSize="11.5" textAnchor="middle" fontWeight="600">persist</text>
+    <text x="499" y="100" fill="var(--text-muted)" fontSize="11" textAnchor="middle">detach · clear · close</text>
+    <text x="500" y="52" fill="#e8a85c" fontSize="11.5" textAnchor="middle" fontWeight="600">merge</text>
+    <text x="398" y="200" fill="#e07a6b" fontSize="11.5" textAnchor="start" fontWeight="600">remove</text>
+    <text x="250" y="135" fill="var(--text-muted)" fontSize="11" textAnchor="middle">find / JPQL (DB→)</text>
+    <text x="620" y="180" fill="var(--text-subtle)" fontSize="11" textAnchor="middle">트랜잭션 종료 후</text>
+    <text x="620" y="196" fill="var(--text-subtle)" fontSize="11" textAnchor="middle">자연히 Detached</text>
+  </svg>
+</Figure>
+
+- **Transient** — `new`로 막 만든 객체. 식별자도, 컨텍스트와의 연결도 없다.
+- **Managed** — 컨텍스트가 추적하는 상태. 여기서 필드를 바꾸면 dirty checking이 잡아 flush 시 UPDATE가 나간다. 핵심 상태.
+- **Detached** — 컨텍스트에서 떨어진 상태. 트랜잭션이 끝나거나 `clear`/`close`하면 managed 엔티티가 여기로 간다. 변경해도 DB 반영 안 됨.
+- **Removed** — `remove` 호출로 삭제 예정 표시. 실제 DELETE는 flush 시점에 나간다.
+
+> **표준 vs 고유 — 재부착의 차이** — Detached를 다시 다루는 방식이 갈린다. Hibernate 고유 `update()`는 *넘긴 객체 자체* 를 managed로 되돌린다(재부착) — 같은 PK의 managed 인스턴스가 이미 있으면 `NonUniqueObjectException`. JPA 표준 `merge()`는 상태를 복사한 *새 managed 객체* 를 반환하고 원본은 detached로 남겨, 이 충돌 자체가 생기지 않는다. 그래서 표준은 merge 하나로 정리됐다.
+
+## 영속성 컨텍스트의 4가지 동작
+
+"객체지향적으로 DB를 다룬다"는 말의 실체. 모두 JPA 표준 동작이며, Hibernate가 `Session` 내부에서 구현한다.
+
+<Figure caption="EntityManager가 들고 있는 컨텍스트 내부 — 네 동작이 한 공간에서 맞물린다">
+  <svg viewBox="0 0 760 340" fontFamily="ui-monospace, monospace" role="img" aria-label="영속성 컨텍스트 내부 동작">
+    <rect x="30" y="30" width="700" height="280" rx="14" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".35" />
+    <text x="50" y="58" fill="#56c7d6" fontSize="13" fontWeight="700">영속성 컨텍스트</text>
+    <rect x="55" y="78" width="320" height="130" rx="10" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="70" y="100" fill="var(--text)" fontSize="12" fontWeight="600">① 1차 캐시 — id → 엔티티</text>
+    <rect x="70" y="112" width="290" height="26" rx="5" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="82" y="129" fill="#56c7d6" fontSize="11">"Member:1"</text><text x="180" y="129" fill="var(--text-subtle)" fontSize="11">→</text><text x="200" y="129" fill="var(--text-muted)" fontSize="11">Member(name=Lee)</text>
+    <rect x="70" y="144" width="290" height="26" rx="5" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="82" y="161" fill="#56c7d6" fontSize="11">"Order:7"</text><text x="180" y="161" fill="var(--text-subtle)" fontSize="11">→</text><text x="200" y="161" fill="var(--text-muted)" fontSize="11">Order(total=...)</text>
+    <text x="70" y="192" fill="var(--text-subtle)" fontSize="10.5">같은 PK 조회 = 같은 인스턴스 (④ 동일성 보장)</text>
+    <rect x="395" y="78" width="310" height="130" rx="10" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="410" y="100" fill="var(--text)" fontSize="12" fontWeight="600">② 스냅샷 → 변경 감지</text>
+    <text x="410" y="124" fill="var(--text-muted)" fontSize="11">적재 시점 값을 스냅샷으로 보관</text>
+    <text x="410" y="144" fill="var(--text-muted)" fontSize="11">flush 때 현재 값과 비교</text>
+    <text x="410" y="170" fill="#7fc99a" fontSize="11">diff 있으면 → UPDATE 자동 생성</text>
+    <text x="410" y="190" fill="var(--text-subtle)" fontSize="10.5">set 메서드만으로 수정 완료, save 호출 불필요</text>
+    <rect x="55" y="226" width="650" height="64" rx="10" fill="#e8a85c1f" stroke="#e8a85c" strokeOpacity=".4" />
+    <text x="70" y="250" fill="#e8a85c" fontSize="12" fontWeight="600">③ 쓰기 지연 (write-behind) — SQL 버퍼</text>
+    <text x="70" y="272" fill="var(--text-muted)" fontSize="11">persist/변경/remove → INSERT·UPDATE·DELETE를 모았다가</text>
+    <text x="660" y="272" fill="#e8a85c" fontSize="11" textAnchor="end">flush 시 한꺼번에 전송 →</text>
+  </svg>
+</Figure>
+
+- **1차 캐시** — 컨텍스트 = 1차 캐시 자체. 같은 트랜잭션 내 같은 PK 조회는 DB를 다시 안 치고 캐시에서 준다.
+- **변경 감지** — dirty checking. 적재 시 스냅샷을 떠두고 flush 때 비교해 바뀐 필드만 UPDATE. `set`만 호출하면 끝, 별도 저장 호출이 필요 없다.
+- **쓰기 지연** — SQL을 즉시 안 던지고 버퍼에 모았다가 flush 때 일괄 전송. JDBC 배치와 결합해 왕복을 줄인다.
+- **동일성 보장** — 같은 컨텍스트에서 같은 엔티티는 `==`가 성립. 캐시가 같은 인스턴스를 돌려주기 때문.
+
+## Flush 타이밍 — SQL은 언제 나가는가 (심화)
+
+"왜 이 시점에 쿼리가 나가지?"의 답. flush는 버퍼에 쌓인 변경분을 DB로 동기화하는 행위이고, 트랜잭션 커밋과는 별개다. **flush ≠ commit** — flush는 SQL을 보낼 뿐, 트랜잭션을 끝내지 않는다.
+
+<Figure caption="FlushModeType.AUTO 기준 — persist는 버퍼링, 쿼리·커밋이 트리거">
+  <svg viewBox="0 0 760 280" fontFamily="ui-monospace, monospace" role="img" aria-label="flush 타이밍 타임라인">
+    <defs><marker id="flushArr" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#56c7d6" /></marker></defs>
+    <line x1="60" y1="150" x2="700" y2="150" stroke="var(--border)" strokeWidth="2" />
+    <text x="60" y="180" fill="var(--text-subtle)" fontSize="10">트랜잭션 시작</text>
+    <text x="700" y="180" fill="var(--text-subtle)" fontSize="10" textAnchor="end">commit</text>
+    <circle cx="150" cy="150" r="6" fill="var(--bg-muted)" stroke="var(--text-muted)" strokeWidth="2" />
+    <text x="150" y="120" fill="var(--text-muted)" fontSize="11" textAnchor="middle">persist(member)</text>
+    <text x="150" y="210" fill="var(--text-subtle)" fontSize="10" textAnchor="middle">SQL 없음</text>
+    <text x="150" y="224" fill="var(--text-subtle)" fontSize="10" textAnchor="middle">버퍼에 INSERT 적재</text>
+    <circle cx="370" cy="150" r="8" fill="#56c7d61f" stroke="#56c7d6" strokeWidth="2.5" />
+    <text x="370" y="115" fill="#56c7d6" fontSize="11" textAnchor="middle" fontWeight="600">JPQL 쿼리 실행</text>
+    <text x="370" y="100" fill="#56c7d6" fontSize="11" textAnchor="middle" fontWeight="600">← AUTO 플러시</text>
+    <line x1="370" y1="142" x2="370" y2="128" stroke="#56c7d6" strokeWidth="1.5" markerEnd="url(#flushArr)" />
+    <text x="370" y="210" fill="#7fc99a" fontSize="10" textAnchor="middle">INSERT 먼저 전송</text>
+    <text x="370" y="224" fill="var(--text-subtle)" fontSize="10" textAnchor="middle">(쿼리 정합성 위해)</text>
+    <circle cx="640" cy="150" r="8" fill="#56c7d61f" stroke="#56c7d6" strokeWidth="2.5" />
+    <text x="640" y="115" fill="#56c7d6" fontSize="11" textAnchor="middle" fontWeight="600">commit</text>
+    <text x="640" y="100" fill="#56c7d6" fontSize="11" textAnchor="middle" fontWeight="600">← 마지막 플러시</text>
+    <line x1="640" y1="142" x2="640" y2="128" stroke="#56c7d6" strokeWidth="1.5" markerEnd="url(#flushArr)" />
+    <text x="640" y="210" fill="#7fc99a" fontSize="10" textAnchor="middle">남은 변경분 전송</text>
+    <text x="640" y="224" fill="var(--text-subtle)" fontSize="10" textAnchor="middle">+ DB commit</text>
+  </svg>
+</Figure>
+
+### flush를 일으키는 세 가지
+
+- **트랜잭션 commit** — 가장 확실한 트리거. 커밋 직전 항상 flush가 일어난다.
+- **JPQL/Criteria 쿼리 실행** — `AUTO` 모드 기본 동작. 쿼리가 방금 변경한 데이터를 못 보면 결과가 틀어지므로, 쿼리 전에 관련 변경분을 먼저 내보낸다. **네이티브 SQL은 이 자동 flush 보장이 약하므로 주의.**
+- **명시적 flush()** — `em.flush()` 직접 호출. 배치에서 메모리 관리나 중간 ID 확보가 필요할 때.
+
+### FlushModeType — 자동 flush 범위 조절
+
+```java filename="FlushMode.java"
+// AUTO (기본) — 커밋 + 쿼리 실행 시 flush
+// COMMIT      — 커밋 시에만 flush, 쿼리 실행으로는 안 함
+em.setFlushMode(FlushModeType.COMMIT);
+
+// 흔한 함정: persist 후 같은 트랜잭션에서 JPQL 조회
+em.persist(member);                           // 버퍼에만
+List<Member> list = em.createQuery(           // AUTO면 여기서 자동 flush →
+    "select m from Member m", Member.class)   // 방금 persist한 member도 보인다
+    .getResultList();
+// 반면 find(id)는 1차 캐시에서 바로 꺼내므로 flush와 무관
+```
+
+> **실무 주의** — flush가 트랜잭션을 커밋하는 게 아니다. flush 후에도 롤백하면 DB는 원복된다. 또 `FlushModeType.COMMIT`으로 바꾸면 쿼리 직전 자동 flush가 사라져, 방금 변경한 데이터가 같은 트랜잭션 쿼리에 안 잡힐 수 있다 — 성능 최적화로 쓰되 정합성 영향을 반드시 검토할 것.
+
+## 키 생성 전략 — ID는 언제 확보되는가 (심화)
+
+앞 절의 원칙은 "persist는 SQL을 flush까지 지연한다"였다. 그런데 **IDENTITY 전략은 이 원칙을 깨는 유일한 예외**다. 각 전략을 가르는 본질은 "ID를 INSERT 전에 받느냐, INSERT를 해야 받느냐" — 이게 곧 쓰기 지연과 배치 INSERT 가능 여부를 결정한다. 아래는 Spring Boot 3 (Hibernate 6) 기준.
+
+<Figure caption="SEQUENCE는 쓰기 지연·배치 유지, IDENTITY는 persist 즉시 INSERT">
+  <svg viewBox="0 0 760 250" fontFamily="ui-monospace, monospace" role="img" aria-label="SEQUENCE vs IDENTITY 키 생성 흐름">
+    <defs><marker id="keyArr" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="var(--text-muted)" /></marker></defs>
+    <text x="40" y="34" fill="#56c7d6" fontSize="13" fontWeight="700">SEQUENCE — ID를 먼저 받는다</text>
+    <rect x="40" y="46" width="150" height="40" rx="7" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="115" y="70" fill="var(--text-muted)" fontSize="10.5" textAnchor="middle">persist()</text>
+    <line x1="190" y1="66" x2="222" y2="66" stroke="var(--text-muted)" strokeWidth="1.3" markerEnd="url(#keyArr)" />
+    <rect x="226" y="46" width="170" height="40" rx="7" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="311" y="64" fill="#56c7d6" fontSize="10" textAnchor="middle">시퀀스에서 ID 확보</text>
+    <text x="311" y="78" fill="var(--text-subtle)" fontSize="9.5" textAnchor="middle">(블록 선할당 가능)</text>
+    <line x1="396" y1="66" x2="428" y2="66" stroke="var(--text-muted)" strokeWidth="1.3" markerEnd="url(#keyArr)" />
+    <rect x="432" y="46" width="170" height="40" rx="7" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="517" y="64" fill="var(--text-muted)" fontSize="10" textAnchor="middle">1차 캐시 적재</text>
+    <text x="517" y="78" fill="var(--text-subtle)" fontSize="9.5" textAnchor="middle">INSERT는 버퍼로</text>
+    <text x="616" y="62" fill="#7fc99a" fontSize="10">→ flush 때</text>
+    <text x="616" y="76" fill="#7fc99a" fontSize="10">배치 INSERT ✓</text>
+    <line x1="40" y1="115" x2="720" y2="115" stroke="var(--border)" strokeDasharray="3 5" />
+    <text x="40" y="150" fill="#e07a6b" fontSize="13" fontWeight="700">IDENTITY — INSERT를 해야 ID가 나온다 (예외)</text>
+    <rect x="40" y="162" width="150" height="40" rx="7" fill="#e07a6b1f" stroke="#e07a6b" strokeOpacity=".5" />
+    <text x="115" y="186" fill="var(--text-muted)" fontSize="10.5" textAnchor="middle">persist()</text>
+    <line x1="190" y1="182" x2="222" y2="182" stroke="var(--text-muted)" strokeWidth="1.3" markerEnd="url(#keyArr)" />
+    <rect x="226" y="162" width="206" height="40" rx="7" fill="#e07a6b1f" stroke="#e07a6b" strokeOpacity=".5" />
+    <text x="329" y="180" fill="#e07a6b" fontSize="10" textAnchor="middle">★ 즉시 INSERT 실행</text>
+    <text x="329" y="194" fill="var(--text-subtle)" fontSize="9.5" textAnchor="middle">생성된 ID를 회수해야 하므로</text>
+    <line x1="432" y1="182" x2="464" y2="182" stroke="var(--text-muted)" strokeWidth="1.3" markerEnd="url(#keyArr)" />
+    <rect x="468" y="162" width="134" height="40" rx="7" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="535" y="186" fill="var(--text-muted)" fontSize="10" textAnchor="middle">ID로 캐시 적재</text>
+    <text x="616" y="180" fill="#e07a6b" fontSize="10">→ 쓰기 지연 ✗</text>
+    <text x="616" y="194" fill="#e07a6b" fontSize="10">배치 INSERT ✗</text>
+  </svg>
+</Figure>
+
+### 5가지 전략
+
+- **IDENTITY** *(JPA 표준)* — DB의 auto_increment / IDENTITY 컬럼에 위임. MySQL `AUTO_INCREMENT`, PostgreSQL `SERIAL`. INSERT를 해야 PK가 나오므로 **persist 즉시 INSERT가 나가고 JDBC 배치가 막힌다.**
+- **SEQUENCE** *(JPA 표준)* — DB 시퀀스 객체에서 INSERT 전에 값을 받아온다. Oracle·PostgreSQL 등. 쓰기 지연과 배치 INSERT가 그대로 살아 있어 대량 쓰기에 유리. `allocationSize`로 블록 선할당 가능.
+- **TABLE** *(JPA 표준)* — 별도 키 관리 테이블로 시퀀스를 흉내. 모든 DB에서 동작하지만 테이블 조회·락 오버헤드로 가장 느리다. 사실상 비권장.
+- **AUTO** *(JPA 표준)* — JPA 기본값. provider가 dialect를 보고 결정 — Hibernate 6에선 시퀀스 지원 DB면 SEQUENCE를 고른다. 운영에선 명시적 지정이 더 예측 가능하다.
+- **UUID** *(Hibernate)* — Hibernate 6부터 `@UuidGenerator`로 표준화. DB 왕복 없이 애플리케이션에서 PK 생성 — 분산 환경에 적합. 단 랜덤 UUID의 인덱스 단편화는 별도 고려(정렬 가능한 UUIDv7 등).
+
+### 전략별 비교 — ID 확보 시점이 모든 걸 가른다
+
+| 전략 | ID 확보 시점 | persist 시 SQL | 배치 INSERT |
+|---|---|---|---|
+| IDENTITY *(JPA)* | INSERT 직후 (DB가 매김) | 즉시 INSERT | 불가 |
+| SEQUENCE *(JPA)* | INSERT 전 (시퀀스 조회) | 버퍼링 (지연) | 가능 |
+| TABLE *(JPA)* | INSERT 전 (테이블 조회) | 버퍼링 (지연) | 가능 (느림) |
+| UUID *(Hibernate)* | persist 시 앱에서 생성 | 버퍼링 (지연) | 가능 |
+
+### allocationSize — SEQUENCE 성능의 핵심
+
+Hibernate 6은 엔티티별 시퀀스를 기본으로 만들고, JPA 표준에 따라 `allocationSize` 기본값이 50이다(5는 1이었다). 이 값이 DB 왕복 횟수를 직접 좌우한다.
+
+- **allocationSize = 1** — 풀링 없음. ID가 필요할 때마다 매번 `nextval()` 호출 → INSERT마다 DB 왕복 1회.
+- **allocationSize = 50 (기본)** — pooled 옵티마이저 동작. 시퀀스를 한 번 당겨 50개 ID를 메모리에서 소진 → DB 왕복이 1/50로 감소.
+
+```java filename="Member.java"
+// 엔티티별 시퀀스 + 블록 선할당 (Hibernate 6 기본 방향)
+@Id
+@GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "member_seq")
+@SequenceGenerator(name = "member_seq", sequenceName = "member_seq",
+                   allocationSize = 50)
+private Long id;
+```
+
+> **주의 — 옵티마이저 정합** — pooled 옵티마이저는 DB 시퀀스의 increment가 엔티티 `allocationSize`와 같아야 정상 동작한다. 어긋나면 ID 갭이나 충돌이 생긴다. Hibernate가 DDL을 생성하면 자동으로 맞지만, 시퀀스를 수동 생성했거나 `import.sql`로 초기 데이터를 넣을 때는 직접 맞춰야 한다.
+
+> **앞 절과의 연결** — 이것이 flush 원칙의 예외 지점이다. SEQUENCE·TABLE·UUID는 ID를 INSERT 전에 확보하므로 persist가 SQL을 버퍼링하지만, IDENTITY만은 ID 회수를 위해 persist 즉시 INSERT를 던진다. 대량 INSERT가 잦은 테이블이라면 이 차이가 곧 성능 차이다.
+
+## Fetch 전략과 N+1 (심화)
+
+연관 엔티티를 언제 로딩하느냐의 문제. 기본 전략을 잘못 잡거나 LAZY를 무심코 순회하면 쿼리가 폭발한다. JPA 실무에서 가장 자주 마주치는 성능 함정.
+
+### LAZY vs EAGER
+
+- **LAZY (지연)** — 연관 엔티티를 프록시로 두고, 실제 접근하는 순간 쿼리. `@OneToMany`·`@ManyToMany`의 기본값.
+- **EAGER (즉시)** — 엔티티 조회 시 연관까지 함께 로딩. `@ManyToOne`·`@OneToOne`의 기본값. **실무에선 모두 LAZY로 두고 필요할 때 fetch join을 권장.**
+
+### N+1 문제 — 어떻게 터지는가
+
+<Figure caption="1번 + N번 — 부모 1쿼리 뒤 자식마다 1쿼리씩 추가로 터진다">
+  <svg viewBox="0 0 760 300" fontFamily="ui-monospace, monospace" role="img" aria-label="N+1 문제와 fetch join 해법">
+    <text x="40" y="32" fill="#e07a6b" fontSize="13" fontWeight="700">문제: LAZY를 루프에서 순회</text>
+    <rect x="40" y="48" width="300" height="34" rx="7" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="54" y="70" fill="#56c7d6" fontSize="11">[1] SELECT * FROM team  → 팀 N개</text>
+    <rect x="60" y="96" width="300" height="28" rx="6" fill="#e07a6b1f" stroke="#e07a6b" strokeOpacity=".5" />
+    <text x="74" y="115" fill="#e07a6b" fontSize="11">[2] SELECT * FROM member WHERE team_id=1</text>
+    <rect x="60" y="128" width="300" height="28" rx="6" fill="#e07a6b1f" stroke="#e07a6b" strokeOpacity=".5" />
+    <text x="74" y="147" fill="#e07a6b" fontSize="11">[3] SELECT * FROM member WHERE team_id=2</text>
+    <rect x="60" y="160" width="300" height="28" rx="6" fill="#e07a6b1f" stroke="#e07a6b" strokeOpacity=".5" />
+    <text x="74" y="179" fill="#e07a6b" fontSize="11">[4] ... team_id=3</text>
+    <text x="74" y="208" fill="var(--text-subtle)" fontSize="10.5">… 팀마다 1번씩 → 총 1 + N 쿼리</text>
+    <text x="40" y="240" fill="var(--text-muted)" fontSize="11">team.getMembers() 접근 시마다</text>
+    <text x="40" y="256" fill="var(--text-muted)" fontSize="11">프록시가 새 쿼리를 던진다</text>
+    <line x1="385" y1="40" x2="385" y2="270" stroke="var(--border)" strokeDasharray="3 5" />
+    <text x="410" y="32" fill="#7fc99a" fontSize="13" fontWeight="700">해법: fetch join — 1 쿼리</text>
+    <rect x="410" y="48" width="320" height="60" rx="7" fill="var(--bg-muted)" stroke="#56c7d6" strokeOpacity=".4" />
+    <text x="424" y="70" fill="#56c7d6" fontSize="11">[1] SELECT t, m FROM Team t</text>
+    <text x="424" y="88" fill="#56c7d6" fontSize="11">    JOIN FETCH t.members</text>
+    <text x="424" y="138" fill="var(--text-muted)" fontSize="11">한 번의 조인으로 팀+멤버를</text>
+    <text x="424" y="154" fill="var(--text-muted)" fontSize="11">함께 적재 → 추가 쿼리 0</text>
+    <text x="410" y="200" fill="var(--text-subtle)" fontSize="10.5">대안: @BatchSize / default_batch_fetch_size</text>
+    <text x="410" y="216" fill="var(--text-subtle)" fontSize="10.5">→ IN 절로 묶어 1 + 1 쿼리로 축소</text>
+    <text x="410" y="248" fill="var(--text-subtle)" fontSize="10.5">대안: @EntityGraph 로 페치 경로 지정</text>
+  </svg>
+</Figure>
+
+```java filename="NPlusOne.java"
+// ❌ N+1 발생 — members가 LAZY일 때 루프에서 초기화
+List<Team> teams = em.createQuery("select t from Team t", Team.class)
+                       .getResultList();           // 쿼리 1번
+for (Team t : teams) {
+    t.getMembers().size();                          // 팀마다 쿼리 1번씩 → N번
+}
+
+// ✅ fetch join — 한 방에
+List<Team> teams = em.createQuery(
+    "select distinct t from Team t join fetch t.members", Team.class)
+    .getResultList();                               // 쿼리 1번으로 끝
+```
+
+### 해법 정리
+
+- **fetch join** — JPQL `join fetch`로 연관을 한 쿼리에 적재. 가장 직접적. 단, 컬렉션 fetch join은 페이징과 충돌(메모리 페이징 경고)하니 주의.
+- **@BatchSize** *(Hibernate)* — LAZY 로딩을 `IN (?, ?, …)`로 묶어 N번을 1번으로. 전역 설정은 `default_batch_fetch_size`.
+- **@EntityGraph** *(JPA 표준)* — 어떤 연관을 함께 EAGER로 가져올지 그래프로 선언. Spring Data 메서드에 바로 얹기 좋다.
+
+> **권장 기본기** — 모든 연관을 `LAZY`로 깔아 의도치 않은 EAGER 폭발을 막고, 필요한 화면·쿼리에서만 fetch join이나 EntityGraph로 명시적으로 끌어온다. "기본은 안 가져옴, 필요할 때만 함께"가 안전한 출발점이다.
+
+## 2차 캐시 — 표준이 끝나는 지점
+
+1차 캐시는 EntityManager(트랜잭션) 범위라 트랜잭션이 끝나면 사라진다. 2차 캐시는 그 범위를 넘어 *SessionFactory(애플리케이션)* 전체가 공유한다. JPA는 큰 틀만 정하고 실제 구현은 provider에 맡기는 — 표준과 구현의 경계가 가장 선명한 영역.
+
+<Figure caption="L1은 트랜잭션마다 따로, L2는 앱 전체가 하나를 공유">
+  <svg viewBox="0 0 760 280" fontFamily="ui-monospace, monospace" role="img" aria-label="1차 캐시와 2차 캐시 범위">
+    <rect x="40" y="30" width="680" height="80" rx="12" fill="#e8a85c1f" stroke="#e8a85c" strokeOpacity=".45" />
+    <text x="60" y="58" fill="#e8a85c" fontSize="13" fontWeight="700">② 2차 캐시 (L2) — SessionFactory 범위 · 모든 트랜잭션 공유</text>
+    <text x="60" y="82" fill="var(--text-muted)" fontSize="11">@Cacheable / shared-cache-mode 는 JPA 표준, 실제 저장소는 provider 영역 →</text>
+    <text x="700" y="82" fill="var(--text-subtle)" fontSize="11" textAnchor="end">Ehcache · Infinispan · Redis</text>
+    <rect x="80" y="150" width="260" height="100" rx="11" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".4" />
+    <text x="210" y="176" fill="#56c7d6" fontSize="12" textAnchor="middle" fontWeight="600">EntityManager A</text>
+    <rect x="110" y="190" width="200" height="40" rx="7" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="210" y="215" fill="var(--text-muted)" fontSize="11" textAnchor="middle">① 1차 캐시 (트랜잭션 범위)</text>
+    <rect x="420" y="150" width="260" height="100" rx="11" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".4" />
+    <text x="550" y="176" fill="#56c7d6" fontSize="12" textAnchor="middle" fontWeight="600">EntityManager B</text>
+    <rect x="450" y="190" width="200" height="40" rx="7" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="550" y="215" fill="var(--text-muted)" fontSize="11" textAnchor="middle">① 1차 캐시 (트랜잭션 범위)</text>
+    <line x1="210" y1="150" x2="210" y2="112" stroke="var(--border)" strokeWidth="1.3" strokeDasharray="4 4" />
+    <line x1="550" y1="150" x2="550" y2="112" stroke="var(--border)" strokeWidth="1.3" strokeDasharray="4 4" />
+    <text x="380" y="135" fill="var(--text-subtle)" fontSize="10" textAnchor="middle">L1 미스 → L2 조회 → DB</text>
+  </svg>
+</Figure>
+
+- **JPA가 정하는 것** — `@Cacheable`, `shared-cache-mode` 같은 캐시 활성화 규약.
+- **provider가 정하는 것** *(Hibernate)* — 실제 캐시 저장소·만료·동시성 전략. Hibernate에서 Ehcache·Infinispan 등을 끼워 쓴다. 여기서부터는 구현체 색이 강하다.
+
+> **주의** — 2차 캐시는 만능이 아니다. 변경이 잦은 엔티티엔 정합성 비용이 크고, 분산 환경에선 노드 간 동기화가 또 다른 숙제다. 읽기 위주의 안정적 데이터에 선별 적용하는 게 정석이다.
+
+## 쿼리 추상화 계층
+
+엔티티를 대상으로 질의하는 여러 방법. 표준과 서드파티가 섞여 있고, 결국 모두 SQL로 번역된다.
+
+- **JPQL** *(JPA)* — 테이블이 아니라 엔티티를 대상으로 하는 표준 쿼리 언어. `select m from Member m where m.age > :age`.
+- **Criteria API** *(JPA)* — 타입 안전한 동적 쿼리를 자바 코드로. 표준이지만 장황해서 실무 선호도는 낮은 편.
+- **Native Query** *(JPA)* — SQL 직접 작성. DB 종속 기능이 필요할 때. 자동 flush 보장이 약한 점은 flush 절 참고.
+- **@NamedQuery** *(JPA)* — 이름 붙인 정적 쿼리. 부팅 시 문법 검증되는 이점.
+- **QueryDSL** *(서드파티)* — JPA 표준이 아닌 서드파티. 타입 안전한 동적 쿼리를 Criteria보다 읽기 쉽게. 내부적으로는 JPQL로 번역돼 결국 표준 위에서 돈다.
+
+## 메서드 대응표 — 표준 vs 고유
+
+Hibernate가 JPA보다 먼저 나왔기에 고유 메서드가 먼저 있었고, 나중에 JPA 표준 메서드를 추가로 얹었다. 두 계열이 오래 공존했고, **Hibernate 6에서는 고유 계열이 deprecated**로 표시돼 있다(동작은 그대로, 경고만). 실제 제거는 Hibernate 7부터다.
+
+| Hibernate 고유 (6: deprecated) | JPA 표준 (권장 대체) | 핵심 차이 |
+|---|---|---|
+| `session.save()` | `persist()` | save는 ID 즉시 반환 위해 INSERT를 앞당기는 경향, persist는 flush까지 지연 |
+| `session.update()` | `merge()` | update는 원본을 재부착(PK 충돌 위험), merge는 복사본 반환 |
+| `session.saveOrUpdate()` | `persist() / merge()` | 신규·기존 자동 분기 → 표준은 상황에 맞게 둘 중 선택 |
+| `session.delete()` | `remove()` | 명칭 통일 |
+| `session.get()` | `find()` | 즉시 SELECT, 없으면 null — 동작 동일, 표준 명칭으로 |
+| `session.load()` | `getReference()` | DB 조회 없이 프록시(참조)만 — 가장 실용적이던 용도, 그대로 계승 |
+
+대체 매핑(save→persist, update→merge, get→find, load→getReference)과 실제 "제거"는 Hibernate 7 기준이며 별도로 다룬다. 위 표는 6 기준 deprecated 상태로 읽을 것.
+
+### 왜 표준은 merge 하나로 갔나
+
+```java filename="MergeVsUpdate.java"
+// Hibernate update() — 넘긴 객체 그 자체가 managed로 (재부착)
+session.update(detached);   // 같은 PK managed 있으면 NonUniqueObjectException
+
+// JPA merge() — 상태를 복사한 새 managed 객체를 반환
+Member managed = em.merge(detached);  // 원본은 detached 유지, 충돌 자체가 없음
+```
+
+> **Spring Data JPA의 save는 다른 물건** — `JpaRepository.save()`는 위 `Session.save()`와 이름만 같다. Spring Data가 엔티티 상태(새 것인지 여부)를 보고 내부에서 `persist` 또는 `merge`를 고르는 추상화다. 그래서 나중에 Hibernate 7로 올라가 고유 메서드가 제거돼도 repository 코드는 영향받지 않는다 — 영향받는 건 `EntityManager.unwrap(Session.class)`로 Session을 직접 꺼내 고유 메서드를 부르는 레거시 코드뿐이다.
