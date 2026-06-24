@@ -176,7 +176,7 @@ JPA의 거의 모든 개념이 이 상태 전이 위에 있다. `save`/`update`/
 - **쓰기 지연** — SQL을 즉시 안 던지고 버퍼에 모았다가 flush 때 일괄 전송. JDBC 배치와 결합해 왕복을 줄인다.
 - **동일성 보장** — 같은 컨텍스트에서 같은 엔티티는 `==`가 성립. 캐시가 같은 인스턴스를 돌려주기 때문.
 
-## Flush 타이밍 — SQL은 언제 나가는가 (심화)
+## Flush 타이밍 — SQL은 언제 나가는가
 
 "왜 이 시점에 쿼리가 나가지?"의 답. flush는 버퍼에 쌓인 변경분을 DB로 동기화하는 행위이고, 트랜잭션 커밋과는 별개다. **flush ≠ commit** — flush는 SQL을 보낼 뿐, 트랜잭션을 끝내지 않는다.
 
@@ -228,7 +228,7 @@ List<Member> list = em.createQuery(           // AUTO면 여기서 자동 flush 
 
 > **실무 주의** — flush가 트랜잭션을 커밋하는 게 아니다. flush 후에도 롤백하면 DB는 원복된다. 또 `FlushModeType.COMMIT`으로 바꾸면 쿼리 직전 자동 flush가 사라져, 방금 변경한 데이터가 같은 트랜잭션 쿼리에 안 잡힐 수 있다 — 성능 최적화로 쓰되 정합성 영향을 반드시 검토할 것.
 
-## 키 생성 전략 — ID는 언제 확보되는가 (심화)
+## 키 생성 전략 — ID는 언제 확보되는가
 
 앞 절의 원칙은 "persist는 SQL을 flush까지 지연한다"였다. 그런데 **IDENTITY 전략은 이 원칙을 깨는 유일한 예외**다. 각 전략을 가르는 본질은 "ID를 INSERT 전에 받느냐, INSERT를 해야 받느냐" — 이게 곧 쓰기 지연과 배치 INSERT 가능 여부를 결정한다. 아래는 Spring Boot 3 (Hibernate 6) 기준.
 
@@ -301,7 +301,7 @@ private Long id;
 
 > **앞 절과의 연결** — 이것이 flush 원칙의 예외 지점이다. SEQUENCE·TABLE·UUID는 ID를 INSERT 전에 확보하므로 persist가 SQL을 버퍼링하지만, IDENTITY만은 ID 회수를 위해 persist 즉시 INSERT를 던진다. 대량 INSERT가 잦은 테이블이라면 이 차이가 곧 성능 차이다.
 
-## Fetch 전략과 N+1 (심화)
+## Fetch 전략과 N+1
 
 연관 엔티티를 언제 로딩하느냐의 문제. 기본 전략을 잘못 잡거나 LAZY를 무심코 순회하면 쿼리가 폭발한다. JPA 실무에서 가장 자주 마주치는 성능 함정.
 
