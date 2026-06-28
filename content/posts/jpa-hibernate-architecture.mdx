@@ -95,8 +95,15 @@ JPA가 정의한 표준 타입은 Hibernate에서 다른 이름의 구현 타입
   </svg>
 </Figure>
 
-- **EntityManagerFactory** *(JPA)* ↔ **SessionFactory** *(Hibernate)* — 앱당 하나, 무겁고 thread-safe. 부팅 시 한 번 만든다.
-- **EntityManager** *(JPA)* ↔ **Session** *(Hibernate)* — 요청/트랜잭션 단위, 가볍고 thread-unsafe. 영속성 컨텍스트를 들고 있다.
+표를 읽기 전에, 이 둘이 **무슨 일을 하는 물건인지**부터 — 아래 속성은 전부 이 역할에서 따라 나온다.
+
+- **Factory** *(EntityManagerFactory / SessionFactory)* — 부팅 시 1번 생성돼 앱 종료까지 사는 단일 객체. 매핑 메타데이터·쿼리 플랜·2차 캐시 같은 **공유 상태**를 보유하고, 요청마다 `EntityManager`를 찍어낸다 → 그래서 **무겁고 thread-safe**.
+- **Manager** *(EntityManager / Session)* — `persist`·`find`·`merge`의 실제 진입점. 트랜잭션 단위로 **영속성 컨텍스트**(가변 상태)를 쌓는다 → 그래서 **가볍고 thread-unsafe**.
+
+표준이 정한 이름과 Hibernate가 구현한 이름은 이렇게 짝지어진다.
+
+- **EntityManagerFactory** *(JPA)* ↔ **SessionFactory** *(Hibernate)* — 위 **Factory** 역할. 부팅 시 한 번 만들어 앱당 하나로 산다.
+- **EntityManager** *(JPA)* ↔ **Session** *(Hibernate)* — 위 **Manager** 역할. 요청/트랜잭션 단위로 영속성 컨텍스트를 들고 있다.
 
 > **짚어둘 점** — **영속성 컨텍스트는 JPA 표준 개념이다.** Hibernate 고유 구조가 아니다. 1차 캐시·변경 감지·쓰기 지연·엔티티 생명주기가 전부 JPA 명세에 들어 있다. Hibernate는 이 무대를 `Session` 내부의 `PersistenceContext`로 *구현* 했을 뿐이다. Hibernate 7부터 `SessionFactory.createEntityManager()`가 편의상 `Session`을 반환하는 것도 Session이 EntityManager의 상위 호환이라는 신호다.
 
