@@ -178,10 +178,112 @@ JPA의 거의 모든 개념이 이 상태 전이 위에 있다. `save`/`update`/
   </svg>
 </Figure>
 
-- **1차 캐시** — 컨텍스트 = 1차 캐시 자체. 같은 트랜잭션 내 같은 PK 조회는 DB를 다시 안 치고 캐시에서 준다.
-- **변경 감지** — dirty checking. 적재 시 스냅샷을 떠두고 flush 때 비교해 바뀐 필드만 UPDATE. `set`만 호출하면 끝, 별도 저장 호출이 필요 없다.
-- **쓰기 지연** — SQL을 즉시 안 던지고 버퍼에 모았다가 flush 때 일괄 전송. JDBC 배치와 결합해 왕복을 줄인다.
-- **동일성 보장** — 같은 컨텍스트에서 같은 엔티티는 `==`가 성립. 캐시가 같은 인스턴스를 돌려주기 때문.
+위 그림이 네 동작이 *한 공간에서* 맞물리는 모습이라면, 아래는 각 동작을 *한 장면씩* 떼어 본 것이다.
+
+**① 1차 캐시** — 같은 PK 재조회 = DB 안 침 *(성능)*. 컨텍스트가 곧 1차 캐시다. 같은 트랜잭션 안에서 같은 PK를 다시 조회하면 DB를 치지 않고 캐시에서 바로 준다.
+
+<Figure caption="① 1차 캐시 — 첫 조회만 DB로, 재조회는 캐시 히트">
+  <svg viewBox="0 0 760 175" fontFamily="ui-monospace, monospace" role="img" aria-label="1차 캐시 — 재조회 시 DB 미접근">
+    <defs>
+      <marker id="c1a" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#56c7d6" /></marker>
+      <marker id="c1x" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#e07a6b" /></marker>
+    </defs>
+    <rect x="24" y="58" width="120" height="56" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="84" y="91" fill="var(--text)" fontSize="12" textAnchor="middle" fontWeight="600">애플리케이션</text>
+    <rect x="290" y="22" width="220" height="128" rx="11" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".45" />
+    <text x="400" y="46" fill="#56c7d6" fontSize="12" textAnchor="middle" fontWeight="700">영속성 컨텍스트 · 1차 캐시</text>
+    <rect x="306" y="60" width="188" height="30" rx="6" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="318" y="80" fill="#56c7d6" fontSize="11">"Member:1"</text><text x="430" y="80" fill="var(--text-subtle)" fontSize="11">→</text><text x="448" y="80" fill="var(--text-muted)" fontSize="11">Member</text>
+    <text x="400" y="130" fill="var(--text-subtle)" fontSize="10.5" textAnchor="middle">처음 조회한 PK가 여기 적재된다</text>
+    <rect x="636" y="58" width="100" height="56" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="686" y="91" fill="var(--text)" fontSize="12" textAnchor="middle" fontWeight="600">DB</text>
+    <text x="216" y="68" fill="var(--text-muted)" fontSize="10" textAnchor="middle">① find(1) 첫 호출</text>
+    <line x1="144" y1="76" x2="288" y2="76" stroke="#56c7d6" strokeWidth="1.3" markerEnd="url(#c1a)" />
+    <line x1="510" y1="76" x2="634" y2="76" stroke="#56c7d6" strokeWidth="1.3" markerEnd="url(#c1a)" />
+    <text x="572" y="68" fill="var(--text-muted)" fontSize="10" textAnchor="middle">SELECT</text>
+    <text x="216" y="124" fill="var(--text-muted)" fontSize="10" textAnchor="middle">② find(1) 재호출</text>
+    <line x1="144" y1="100" x2="288" y2="100" stroke="#56c7d6" strokeWidth="1.3" markerEnd="url(#c1a)" />
+    <line x1="510" y1="100" x2="634" y2="100" stroke="#e07a6b" strokeWidth="1.3" strokeDasharray="4 4" markerEnd="url(#c1x)" />
+    <text x="572" y="124" fill="#e07a6b" fontSize="10" textAnchor="middle">DB 미접근 ✗</text>
+  </svg>
+</Figure>
+
+**② 변경 감지 (dirty checking)** — 스냅샷 vs 현재 비교로 `set`만 해도 UPDATE 자동 *(편의)*. 적재 시점 값을 스냅샷으로 떠두고, flush 때 현재 값과 비교해 바뀐 필드의 UPDATE를 만든다. 별도 저장 호출이 없다.
+
+<Figure caption="② 변경 감지 — flush 때 스냅샷과 현재 값을 비교해 UPDATE 생성">
+  <svg viewBox="0 0 760 190" fontFamily="ui-monospace, monospace" role="img" aria-label="변경 감지 — 스냅샷 비교로 UPDATE 자동 생성">
+    <defs>
+      <marker id="c2n" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="var(--text-subtle)" /></marker>
+      <marker id="c2g" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#7fc99a" /></marker>
+    </defs>
+    <rect x="24" y="34" width="230" height="52" rx="9" fill="var(--bg-muted)" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="38" y="56" fill="#56c7d6" fontSize="11" fontWeight="600">스냅샷 · 로드 시점</text>
+    <text x="38" y="76" fill="var(--text-muted)" fontSize="11">name = "Lee"</text>
+    <rect x="24" y="104" width="230" height="52" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="38" y="126" fill="var(--text)" fontSize="11" fontWeight="600">현재 값 · set 이후</text>
+    <text x="38" y="146" fill="var(--text-muted)" fontSize="11">name = "Kim"</text>
+    <rect x="320" y="69" width="150" height="52" rx="9" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="395" y="92" fill="var(--text)" fontSize="11" textAnchor="middle" fontWeight="600">flush 시 비교</text>
+    <text x="395" y="110" fill="var(--text-subtle)" fontSize="10" textAnchor="middle">diff 검출</text>
+    <rect x="520" y="69" width="216" height="52" rx="9" fill="#7fc99a1f" stroke="#7fc99a" strokeOpacity=".55" />
+    <text x="628" y="92" fill="#7fc99a" fontSize="11" textAnchor="middle" fontWeight="600">UPDATE 자동 생성</text>
+    <text x="628" y="110" fill="var(--text-muted)" fontSize="10" textAnchor="middle">save() 호출 없이</text>
+    <line x1="254" y1="60" x2="318" y2="84" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#c2n)" />
+    <line x1="254" y1="130" x2="318" y2="106" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#c2n)" />
+    <line x1="470" y1="95" x2="518" y2="95" stroke="#7fc99a" strokeWidth="1.3" markerEnd="url(#c2g)" />
+    <text x="380" y="182" fill="var(--text-subtle)" fontSize="10.5" textAnchor="middle">member.setName("Kim") 한 줄로 끝 — 명시적 save() 호출이 없다</text>
+  </svg>
+</Figure>
+
+**③ 쓰기 지연 (write-behind)** — SQL을 모았다 flush 때 일괄 전송 *(왕복 절감)*. persist·변경·remove를 즉시 던지지 않고 SQL 버퍼에 쌓아뒀다가, flush 시점에 한꺼번에 내보낸다. JDBC 배치와 묶여 왕복이 준다.
+
+<Figure caption="③ 쓰기 지연 — SQL을 버퍼에 모았다 flush 때 일괄 전송">
+  <svg viewBox="0 0 760 195" fontFamily="ui-monospace, monospace" role="img" aria-label="쓰기 지연 — SQL 버퍼링 후 일괄 전송">
+    <defs>
+      <marker id="c3a" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#e8a85c" /></marker>
+    </defs>
+    <rect x="40" y="26" width="380" height="142" rx="11" fill="#e8a85c1f" stroke="#e8a85c" strokeOpacity=".45" />
+    <text x="58" y="50" fill="#e8a85c" fontSize="12" fontWeight="700">SQL 버퍼 · 쓰기 지연</text>
+    <rect x="58" y="62" width="344" height="28" rx="5" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="70" y="81" fill="var(--text-muted)" fontSize="11">INSERT into orders ...</text>
+    <rect x="58" y="96" width="344" height="28" rx="5" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="70" y="115" fill="var(--text-muted)" fontSize="11">UPDATE member set ...</text>
+    <rect x="58" y="130" width="344" height="28" rx="5" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="70" y="149" fill="var(--text-muted)" fontSize="11">DELETE from cart ...</text>
+    <rect x="616" y="68" width="110" height="58" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="671" y="102" fill="var(--text)" fontSize="12" textAnchor="middle" fontWeight="600">DB</text>
+    <line x1="420" y1="97" x2="614" y2="97" stroke="#e8a85c" strokeWidth="1.4" markerEnd="url(#c3a)" />
+    <text x="517" y="88" fill="#e8a85c" fontSize="10.5" textAnchor="middle">flush: JDBC 배치로</text>
+    <text x="517" y="115" fill="#e8a85c" fontSize="10.5" textAnchor="middle">한꺼번에 전송</text>
+    <text x="230" y="186" fill="var(--text-subtle)" fontSize="10.5" textAnchor="middle">persist·변경·remove는 즉시 안 나가고 flush 때 한 번에</text>
+  </svg>
+</Figure>
+
+**④ 동일성 보장** — 같은 인스턴스를 돌려줘 `==` 성립 *(①의 부산물)*. 같은 컨텍스트에서 같은 PK를 두 번 조회하면 캐시가 같은 인스턴스를 돌려줘 `a == b`가 성립한다. ①의 직접적인 귀결이다.
+
+<Figure caption="④ 동일성 보장 — 같은 PK 조회는 같은 인스턴스 참조를 반환">
+  <svg viewBox="0 0 760 175" fontFamily="ui-monospace, monospace" role="img" aria-label="동일성 보장 — 같은 인스턴스 반환으로 == 성립">
+    <defs>
+      <marker id="c4n" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#56c7d6" /></marker>
+      <marker id="c4g" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#7fc99a" /></marker>
+    </defs>
+    <rect x="24" y="32" width="150" height="48" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="99" y="62" fill="var(--text)" fontSize="12" textAnchor="middle">a = find(1)</text>
+    <rect x="24" y="100" width="150" height="48" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="99" y="130" fill="var(--text)" fontSize="12" textAnchor="middle">b = find(1)</text>
+    <rect x="300" y="56" width="220" height="64" rx="10" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="410" y="82" fill="#56c7d6" fontSize="12" textAnchor="middle" fontWeight="700">Member@7f3a</text>
+    <text x="410" y="102" fill="var(--text-muted)" fontSize="10.5" textAnchor="middle">1차 캐시 안에 단 1개</text>
+    <rect x="560" y="64" width="176" height="48" rx="9" fill="#7fc99a1f" stroke="#7fc99a" strokeOpacity=".55" />
+    <text x="648" y="93" fill="#7fc99a" fontSize="12" textAnchor="middle" fontWeight="600">a == b → true</text>
+    <line x1="174" y1="56" x2="298" y2="80" stroke="#56c7d6" strokeWidth="1.3" markerEnd="url(#c4n)" />
+    <line x1="174" y1="124" x2="298" y2="100" stroke="#56c7d6" strokeWidth="1.3" markerEnd="url(#c4n)" />
+    <line x1="520" y1="88" x2="558" y2="88" stroke="#7fc99a" strokeWidth="1.3" markerEnd="url(#c4g)" />
+    <text x="380" y="166" fill="var(--text-subtle)" fontSize="10.5" textAnchor="middle">① 1차 캐시의 귀결 — 캐시가 같은 참조를 돌려준다</text>
+  </svg>
+</Figure>
+
+네 동작은 따로 노는 게 아니라 두 축으로 엮인다. **①과 ④**는 같은 캐시 메커니즘의 두 얼굴이다 — 하나는 DB 절약, 하나는 인스턴스 동일성. **②와 ③**은 flush 시점에 맞물리는 한 쌍이다 — 무엇을 보낼지 정하는 게 ②, 언제 묶어 보낼지가 ③.
 
 ## Flush 타이밍 — SQL은 언제 나가는가
 
