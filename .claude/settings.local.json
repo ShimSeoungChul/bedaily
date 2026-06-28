@@ -11,7 +11,9 @@
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
       "Bash(rm /Users/com/IdeaProjects/bedaily/content/events/*.mdx)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(pkill -f \"next-server\")"
     ]
   }
 }

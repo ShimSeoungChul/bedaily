@@ -1,0 +1,1913 @@
+---
+title: "GoF 디자인 패턴, 실제로 적용하기 — Java 백엔드 레퍼런스"
+date: "2026-06-28"
+category: "Backend"
+tags: ["디자인패턴", "GoF", "OOP", "SOLID", "Spring"]
+summary: "23개 GoF 패턴을 실무 코드 냄새에서 출발해 정리합니다. 각 패턴은 동일한 7단계 스키마(증상 · 구조 · 역할 · Before/After · 현대 Java·Spring · 트레이드오프 · 안 쓸 때·헷갈림)로 작성했고, 범주 색(생성=골드·구조=틸·행위=바이올렛)을 시각 언어로 일관 사용합니다."
+published: true
+---
+
+{/* 모든 다이어그램이 공유하는 마커 정의 */}
+<svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden="true">
+  <defs>
+    <marker id="tri" markerWidth="14" markerHeight="14" refX="11" refY="5" orient="auto">
+      <path d="M1,1 L11,5 L1,9 Z" fill="none" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    </marker>
+    <marker id="arr" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto">
+      <path d="M1,1 L9,4 L1,7" fill="none" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    </marker>
+    <marker id="diamond" markerWidth="16" markerHeight="12" refX="14" refY="5" orient="auto">
+      <path d="M1,5 L7,1 L13,5 L7,9 Z" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.2" />
+    </marker>
+  </defs>
+</svg>
+
+## 시작하기 전에 — 패턴은 복잡도를 없애지 않는다, 옮길 뿐이다
+
+23개 GoF 패턴을 외우는 글이 아니다. **"지금 내 코드가 이런 모양이다"라는 증상에서 출발해 처방으로** 가는 레퍼런스다. 각 패턴은 동일한 **7단계 스키마**로 정리했다.
+
+1. 이런 증상이면 쓴다
+2. 구조
+3. 구성요소 역할
+4. Before → After
+5. 현대 Java / Spring에서
+6. 장점 / 트레이드오프
+7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+대부분의 GoF 패턴은 SOLID, 특히 OCP(개방-폐쇄)와 DIP(의존성 역전)를 코드로 실현하는 수단이다. ★ 표기는 백엔드 실무 빈도다 — **★★★ 자주 직접 구현 · ★★ 가끔 · ★ 드묾 · ☆ 거의 프레임워크가 대신**.
+
+범주는 색으로 구분한다. **생성 = 골드 · 구조 = 틸 · 행위 = 바이올렛**.
+
+- 생성 패턴 5
+- 구조 패턴 7
+- 행위 패턴 11
+
+> **과용 경고.** 패턴은 구조를 추가해 유연성을 사지만, 클래스 수와 간접 호출이 늘어 가독성을 지불한다. 변화의 축이 실제로 존재할 때만 도입하라 — YAGNI.
+
+## 라우팅 — 증상에서 후보 패턴으로
+
+"지금 내 코드가 이런 모양이다"에서 시작하라. 후보가 여럿이면 차이는 맨 아래 [비교 섹션](#헷갈리는-쌍-한-줄로-가른다)에서.
+
+| 코드 냄새 / 증상 | 후보 패턴 |
+| --- | --- |
+| 분기(if-else/switch)가 계속 늘어난다 (결제·알림·할인 종류 추가) | Strategy · State · Factory Method |
+| 생성자 인자가 폭증한다 / 생성이 복잡하다 (선택 인자 다수, 불변 객체) | Builder · Abstract Factory · Prototype |
+| 인스턴스가 딱 하나여야 한다 (설정·풀·캐시) | Singleton |
+| 외부/레거시 인터페이스가 안 맞는다 | Adapter |
+| 코드 수정 없이 기능을 덧씌우고 싶다 (로깅·캐싱·권한) | Decorator · Proxy |
+| 복잡한 서브시스템 사용이 번거롭다 | Facade |
+| 트리/계층 구조를 균일하게 다루고 싶다 | Composite |
+| 한 객체 변화를 여러 곳에 알려야 한다 | Observer |
+| 절차 뼈대는 같고 일부 단계만 다르다 | Template Method |
+| 요청 처리기를 순서대로 거치게 하고 싶다 (필터·인터셉터) | Chain of Responsibility |
+| 요청을 객체화해 취소/큐잉/로깅하고 싶다 | Command |
+| 상태 전이가 있는 도메인이다 (주문·결제 라이프사이클) | State |
+
+### 다이어그램 범례 (23개 전부 동일 표기)
+
+- **점선 테두리** — interface
+- **회색 채움** — abstract / context
+- **범주색 채움** — concrete (생성=골드·구조=틸·행위=바이올렛)
+- 점선 화살표 + 빈 삼각형 △ — 구현(realization) / 상속(inheritance)
+- 실선 화살표 → — 연관·참조 / «creates»
+- 마름모 ◇ — 합성·집약(has-a)
+
+---
+
+# 생성 패턴 (Creational)
+
+객체 생성 과정을 캡슐화한다. "어떻게 만들지"를 사용 코드에서 떼어내 결합을 낮춘다.
+
+- Builder ★★★
+- Factory Method ★★
+- Singleton ★★
+- Abstract Factory ★
+- Prototype ★
+
+## Builder (빌더) · 생성 ★★★ 자주 · 직접 구현
+
+> 복잡한 객체의 생성 과정과 표현을 분리해, 같은 절차로 다양한 객체를 단계적으로 조립한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 생성자 인자가 많고, 그중 다수가 **선택적**이다 (텔레스코핑 생성자)
+- `new Order(null, null, 3, null, true)`처럼 인자 의미를 알 수 없다
+- 생성 후 변경 없는 **불변 객체**를 만들고 싶다
+
+### 2. 구조
+
+<Figure caption="Client가 Builder를 거쳐 Order를 단계적으로 조립한다">
+  <svg viewBox="0 0 600 180" fontFamily="var(--font-mono), monospace" role="img" aria-label="Builder 구조">
+    <rect x="30" y="64" width="150" height="56" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="105" y="88" textAnchor="middle" fill="var(--text)" fontSize="13">Client</text>
+    <text x="105" y="106" textAnchor="middle" fill="var(--text-muted)" fontSize="10">director 역할</text>
+    <rect x="225" y="58" width="160" height="68" rx="8" fill="rgba(224,164,88,.12)" stroke="#e0a458" strokeWidth="1.3" />
+    <text x="305" y="83" textAnchor="middle" fill="var(--text)" fontSize="13">OrderBuilder</text>
+    <text x="305" y="101" textAnchor="middle" fill="var(--text-muted)" fontSize="10">+ item() + qty()</text>
+    <text x="305" y="116" textAnchor="middle" fill="var(--text-muted)" fontSize="10">+ build(): Order</text>
+    <rect x="440" y="64" width="130" height="56" rx="8" fill="rgba(224,164,88,.12)" stroke="#e0a458" strokeWidth="1.3" />
+    <text x="505" y="96" textAnchor="middle" fill="var(--text)" fontSize="13">Order</text>
+    <line x1="180" y1="92" x2="223" y2="92" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <line x1="385" y1="92" x2="438" y2="92" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <text x="411" y="83" textAnchor="middle" fill="var(--text-subtle)" fontSize="9">«creates»</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Builder** — 단계별 설정 메서드 + `build()`. 보통 메서드 체이닝으로 가독성 확보
+- **Product** — 최종 생성물. 불변으로 설계하는 경우가 많음
+- **Director (선택)** — 조립 순서를 캡슐화. 실무에선 생략되고 클라이언트가 직접 호출
+
+### 4. Before → After
+
+**Before — 텔레스코핑**
+
+```java
+new Order(
+  "SKU-1", null, 3,
+  null, true, null);
+// 인자 순서·의미 추적 불가
+// 생성자 오버로드 폭증
+```
+
+**After — 빌더 체이닝**
+
+```java
+Order o = Order.builder()
+  .sku("SKU-1")
+  .qty(3)
+  .giftWrap(true)
+  .build(); // 의미 명확·불변
+```
+
+### 5. 현대 Java / Spring에서
+
+- **Lombok `@Builder`** — 보일러플레이트 제거의 표준
+- **`record`** — 불변 + 명명 인자 일부를 대체 (필드 적을 때)
+- **실사용처** — `StringBuilder`, `UriComponentsBuilder`, `Stream.Builder`, HTTP `HttpRequest.newBuilder()`
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 가독성 높은 명명 인자
+- 불변 객체 안전 생성
+- 선택 인자·검증 유연
+
+**트레이드오프**
+
+- 빌더 클래스 보일러플레이트(롬복으로 완화)
+- 필드 2~3개엔 과함
+- 객체 2개(빌더+제품) 생성 비용
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **쓰지 말 때** — 필수 인자 1~2개뿐이면 생성자/`record`가 낫다
+- **vs Factory Method** — Builder는 *한 객체를 단계적으로*, Factory는 *어떤 클래스를* 만들지 결정
+
+## Factory Method (팩토리 메서드) · 생성 ★★ 가끔 · 프레임워크가 해줌
+
+> 객체 생성 인터페이스는 정의하되, 어떤 구체 클래스를 만들지는 서브클래스가 결정하게 한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 처리 흐름은 같은데 **생성할 객체 종류만** 분기별로 다르다
+- 상위 로직이 구체 타입(`new PdfReport()`)에 묶여 확장이 막힌다
+
+### 2. 구조
+
+<Figure caption="상위 흐름은 고정하고, 어떤 Report를 만들지는 서브클래스가 결정한다">
+  <svg viewBox="0 0 600 280" fontFamily="var(--font-mono), monospace" role="img" aria-label="Factory Method 구조">
+    <rect x="30" y="36" width="210" height="68" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="135" y="58" textAnchor="middle" fill="var(--text-muted)" fontSize="10">«abstract»</text>
+    <text x="135" y="76" textAnchor="middle" fill="var(--text)" fontSize="13" fontStyle="italic">ReportService</text>
+    <text x="135" y="93" textAnchor="middle" fill="var(--text-muted)" fontSize="9.5">generate() / createReport()*</text>
+    <rect x="40" y="196" width="190" height="52" rx="8" fill="rgba(224,164,88,.12)" stroke="#e0a458" strokeWidth="1.3" />
+    <text x="135" y="226" textAnchor="middle" fill="var(--text)" fontSize="12">PdfReportService</text>
+    <line x1="135" y1="196" x2="135" y2="106" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <rect x="380" y="40" width="190" height="60" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="475" y="63" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface»</text>
+    <text x="475" y="82" textAnchor="middle" fill="var(--text)" fontSize="13">Report</text>
+    <rect x="395" y="196" width="160" height="48" rx="8" fill="rgba(224,164,88,.12)" stroke="#e0a458" strokeWidth="1.3" />
+    <text x="475" y="225" textAnchor="middle" fill="var(--text)" fontSize="12">PdfReport</text>
+    <line x1="475" y1="196" x2="475" y2="102" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="230" y1="220" x2="393" y2="220" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <text x="311" y="211" textAnchor="middle" fill="var(--text-subtle)" fontSize="9">«creates»</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Creator** — 팩토리 메서드 선언 + 결과(Product)를 쓰는 공통 흐름
+- **ConcreteCreator** — 팩토리 메서드를 오버라이드해 구체 Product 반환
+- **Product** — 생성되는 객체의 공통 인터페이스
+
+### 4. Before → After
+
+**Before — 생성·흐름 결합**
+
+```java
+void generate(String t){
+  Report r = t.equals("PDF")
+    ? new PdfReport()
+    : new ExcelReport();
+  r.fill(); r.export();
+}
+```
+
+**After — 서브클래스가 결정**
+
+```java
+abstract class ReportService{
+  final void generate(){
+    Report r = createReport();
+    r.fill(); r.export();
+  }
+  abstract Report createReport();
+}
+```
+
+### 5. 현대 Java / Spring에서
+
+- **실사용처** — `Calendar.getInstance()`, `NumberFormat.getInstance()`, `BeanFactory.getBean()`
+- **주의** — 정적 팩토리(`List.of`, `Optional.of`)는 이름만 비슷, GoF 의도(*서브클래스 결정*)와 다름
+- Spring에선 DI가 생성을 대신해 직접 구현 빈도 낮음
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 생성·사용 분리
+- 구체 타입 의존 제거 (DIP)
+- 서브클래스 추가로 확장
+
+**트레이드오프**
+
+- Product마다 Creator 서브클래스 → 클래스 증가
+- 상속 기반이라 합성보다 경직
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **쓰지 말 때** — 타입 고정이거나 DI 컨테이너가 생성 관리할 때
+- **vs Abstract Factory** — 객체 *한 종류* vs 어울리는 *객체군*
+
+## Singleton (싱글톤) · 생성 ★★ 자주(단 DI로) · enum 한 줄
+
+> 클래스의 인스턴스를 단 하나만 보장하고, 전역 접근점을 제공한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 인스턴스가 여러 개면 안 되는 자원 — 설정 홀더, 커넥션 풀, 캐시, ID 발급기
+- 전역에서 같은 인스턴스에 접근해야 한다
+
+### 2. 구조
+
+<Figure caption="private 생성자로 외부 new를 막고, 유일 인스턴스를 자신이 보관한다">
+  <svg viewBox="0 0 600 150" fontFamily="var(--font-mono), monospace" role="img" aria-label="Singleton 구조">
+    <rect x="200" y="34" width="200" height="86" rx="8" fill="rgba(224,164,88,.12)" stroke="#e0a458" strokeWidth="1.3" />
+    <text x="300" y="58" textAnchor="middle" fill="var(--text)" fontSize="14">Singleton</text>
+    <line x1="212" y1="68" x2="388" y2="68" stroke="var(--text-subtle)" strokeWidth="1" />
+    <text x="300" y="85" textAnchor="middle" fill="var(--text-muted)" fontSize="10">- static instance</text>
+    <text x="300" y="100" textAnchor="middle" fill="var(--text-muted)" fontSize="10">- private 생성자</text>
+    <text x="300" y="114" textAnchor="middle" fill="#46c8b0" fontSize="10">+ static getInstance()</text>
+    <path d="M300,120 C360,140 360,20 318,34" fill="none" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#arr)" />
+    <text x="385" y="80" fill="var(--text-subtle)" fontSize="9">self</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **private 생성자** — 외부 `new` 차단
+- **static instance** — 유일 인스턴스 보관
+- **getInstance()** — 전역 접근점. 멀티스레드 안전성 필요
+
+### 4. Before → After
+
+**Before — 위태로운 lazy**
+
+```java
+static Config i;
+static Config get(){
+  if(i == null)
+    i = new Config(); // 경쟁상태
+  return i;
+}
+```
+
+**After — enum (직렬화·스레드 안전)**
+
+```java
+public enum Config {
+  INSTANCE;
+  private final Props p = load();
+  public Props props(){ return p; }
+}
+```
+
+### 5. 현대 Java / Spring에서
+
+- **enum INSTANCE** — Effective Java 권장. 리플렉션·직렬화 공격에도 단일성 보장
+- **Spring Bean** — 기본 스코프가 싱글톤. 직접 구현 대신 컨테이너에 맡기는 게 실무 표준
+- 홀더 클래스(`LazyHolder`) 관용구 — 지연 초기화 + 스레드 안전
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 단일 인스턴스·자원 절약
+- 전역 접근
+
+**트레이드오프**
+
+- 전역 가변 상태 → 테스트·동시성 난이도↑
+- 숨은 의존성, 안티패턴 비판
+- 직접 구현 시 멀티스레드 함정
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **쓰지 말 때** — 가변 상태를 들고 전역 공유하면 위험. DI 빈으로 대체
+- **vs Spring 싱글톤** — GoF는 JVM당 1개, Spring은 *컨테이너당* 1개
+
+## Abstract Factory (추상 팩토리) · 생성 ★ 드묾 · DI로 대체
+
+> 서로 관련되거나 의존하는 객체군을, 구체 클래스를 명시하지 않고 일관되게 생성한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 함께 어울려야 하는 **제품군**이 있다 (예: Oracle용 Connection·Dialect·Sequence vs PostgreSQL용)
+- 제품군을 통째로 교체하되, 한 군 안의 객체들이 섞이면 안 된다
+
+### 2. 구조
+
+<Figure caption="한 ConcreteFactory가 같은 제품군의 객체들을 일괄 생성한다">
+  <svg viewBox="0 0 600 230" fontFamily="var(--font-mono), monospace" role="img" aria-label="Abstract Factory 구조">
+    <rect x="30" y="36" width="200" height="64" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="130" y="58" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface»</text>
+    <text x="130" y="76" textAnchor="middle" fill="var(--text)" fontSize="12">DbFactory</text>
+    <text x="130" y="92" textAnchor="middle" fill="var(--text-muted)" fontSize="9">conn() · dialect()</text>
+    <rect x="20" y="160" width="100" height="48" rx="7" fill="rgba(224,164,88,.12)" stroke="#e0a458" strokeWidth="1.3" />
+    <text x="70" y="189" textAnchor="middle" fill="var(--text)" fontSize="11">OracleFactory</text>
+    <rect x="140" y="160" width="110" height="48" rx="7" fill="rgba(224,164,88,.12)" stroke="#e0a458" strokeWidth="1.3" />
+    <text x="195" y="189" textAnchor="middle" fill="var(--text)" fontSize="11">PostgresFactory</text>
+    <line x1="70" y1="160" x2="120" y2="100" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="195" y1="160" x2="145" y2="100" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <rect x="360" y="50" width="100" height="40" rx="7" fill="none" stroke="#46c8b0" strokeWidth="1.4" strokeDasharray="5 4" />
+    <text x="410" y="75" textAnchor="middle" fill="var(--text)" fontSize="11">Connection</text>
+    <rect x="360" y="120" width="100" height="40" rx="7" fill="none" stroke="#46c8b0" strokeWidth="1.4" strokeDasharray="5 4" />
+    <text x="410" y="145" textAnchor="middle" fill="var(--text)" fontSize="11">Dialect</text>
+    <line x1="230" y1="62" x2="358" y2="70" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#arr)" />
+    <line x1="230" y1="78" x2="358" y2="138" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#arr)" />
+    <text x="500" y="110" fill="var(--text-subtle)" fontSize="9">제품군</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **AbstractFactory** — 제품군 생성 메서드 묶음 선언
+- **ConcreteFactory** — 한 제품군의 객체들을 일괄 생성
+- **AbstractProduct** — 각 제품의 공통 인터페이스
+
+### 4. Before → After
+
+**Before — 군 섞임 위험**
+
+```java
+Connection c = new OracleConn();
+Dialect d = new PgDialect();
+// Oracle + Postgres 혼용
+// → 런타임 사고
+```
+
+**After — 팩토리가 일괄**
+
+```java
+DbFactory f = new OracleFactory();
+Connection c = f.conn();
+Dialect d = f.dialect();
+// 같은 군 보장
+```
+
+### 5. 현대 Java / Spring에서
+
+- **실사용처** — `DocumentBuilderFactory`, `SqlSessionFactory`(MyBatis), JDBC 드라이버 군
+- 실무에선 제품군 전환을 **DI 프로파일/조건부 빈**으로 푸는 경우가 더 많음
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 제품군 일관성 보장
+- 군 전체를 한 번에 교체
+
+**트레이드오프**
+
+- 새 *제품* 추가 시 모든 팩토리 수정(인터페이스 변경)
+- 클래스 수 급증, 가장 무거운 생성 패턴
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **쓰지 말 때** — 제품이 1종이면 Factory Method로 충분
+- **vs Factory Method** — Factory Method는 메서드 1개(상속), Abstract Factory는 메서드 묶음(합성)
+
+## Prototype (프로토타입) · 생성 ★ 드묾
+
+> 기존 인스턴스를 복제해 새 객체를 만든다. 클래스가 아니라 객체를 원형으로 삼는다.
+
+### 1. 이런 증상이면 쓴다
+
+- 생성 비용이 큰 객체(DB·파일 조회로 초기화)를 여러 개 만들어야 한다
+- 런타임에 구성된 객체를 그대로 본떠 변형본을 만들고 싶다
+
+### 2. 구조
+
+<Figure caption="구체 타입을 몰라도 원형에게 clone()을 요청해 복제한다">
+  <svg viewBox="0 0 600 160" fontFamily="var(--font-mono), monospace" role="img" aria-label="Prototype 구조">
+    <rect x="200" y="30" width="200" height="56" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="300" y="53" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface»</text>
+    <text x="300" y="72" textAnchor="middle" fill="var(--text)" fontSize="12">Prototype · clone()</text>
+    <rect x="150" y="118" width="130" height="36" rx="7" fill="rgba(224,164,88,.12)" stroke="#e0a458" strokeWidth="1.3" />
+    <text x="215" y="141" textAnchor="middle" fill="var(--text)" fontSize="11">ConcreteA</text>
+    <rect x="320" y="118" width="130" height="36" rx="7" fill="rgba(224,164,88,.12)" stroke="#e0a458" strokeWidth="1.3" />
+    <text x="385" y="141" textAnchor="middle" fill="var(--text)" fontSize="11">ConcreteB</text>
+    <line x1="215" y1="118" x2="270" y2="86" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="385" y1="118" x2="330" y2="86" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Prototype** — `clone()` 선언
+- **ConcretePrototype** — 자신을 복제해 반환
+- **Client** — 원형에게 복제를 요청, 구체 타입 몰라도 됨
+
+### 4. Before → After
+
+**Before — 매번 재생성**
+
+```java
+Doc d = new Doc();
+d.loadTemplate(); // 무거운 IO
+d.applyStyles();  // 매번 반복
+```
+
+**After — 복사 생성자/clone**
+
+```java
+Doc base = Doc.loadOnce();
+Doc a = base.copy(); // 얕은/깊은
+Doc b = base.copy();
+// 무거운 초기화 1회
+```
+
+### 5. 현대 Java / Spring에서
+
+- **`Cloneable`은 비권장** — 설계 결함으로 악명. **복사 생성자/정적 팩토리**가 실무 표준
+- **주의** — Spring `prototype` 스코프는 "매 요청마다 새 빈"으로 이름만 비슷, 복제와 무관
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 무거운 초기화 재사용
+- 구체 타입 의존 없이 복제
+
+**트레이드오프**
+
+- 얕은 복사 vs 깊은 복사 함정
+- 순환 참조·가변 필드 복제 까다로움
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **쓰지 말 때** — 생성 비용이 낮으면 그냥 `new`가 명확
+- **vs Builder** — Prototype은 *기존 객체 복제*, Builder는 *처음부터 조립*
+
+---
+
+# 구조 패턴 (Structural)
+
+클래스·객체를 더 큰 구조로 조합한다. 합성으로 유연성을 얻고, 인터페이스를 다듬어 결합을 관리한다.
+
+- Adapter ★★★
+- Decorator ★★★
+- Proxy ★★★
+- Facade ★★★
+- Composite ★★
+- Bridge ★
+- Flyweight ★
+
+## Adapter (어댑터) · 구조 ★★★ 자주 · 직접 구현
+
+> 호환되지 않는 인터페이스를, 클라이언트가 기대하는 인터페이스로 변환해 함께 동작하게 한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 외부 라이브러리/레거시 API의 시그니처가 우리 코드와 안 맞는다
+- 같은 역할의 서드파티 구현이 여럿이고 각각 인터페이스가 다르다 (예: PG사별 결제 SDK)
+
+### 2. 구조
+
+<Figure caption="Adapter가 Target을 구현하면서 Adaptee를 감싸 변환한다">
+  <svg viewBox="0 0 600 180" fontFamily="var(--font-mono), monospace" role="img" aria-label="Adapter 구조">
+    <rect x="20" y="62" width="120" height="52" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="80" y="92" textAnchor="middle" fill="var(--text)" fontSize="12">Client</text>
+    <rect x="190" y="34" width="150" height="52" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="265" y="56" textAnchor="middle" fill="#46c8b0" fontSize="10">«target»</text>
+    <text x="265" y="74" textAnchor="middle" fill="var(--text)" fontSize="12">PayGateway</text>
+    <rect x="190" y="108" width="150" height="52" rx="8" fill="rgba(70,200,176,.12)" stroke="#46c8b0" strokeWidth="1.3" />
+    <text x="265" y="138" textAnchor="middle" fill="var(--text)" fontSize="12">TossAdapter</text>
+    <rect x="410" y="108" width="160" height="52" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="490" y="131" textAnchor="middle" fill="var(--text)" fontSize="12">TossSdk</text>
+    <text x="490" y="148" textAnchor="middle" fill="var(--text-muted)" fontSize="9">«adaptee»</text>
+    <line x1="140" y1="80" x2="188" y2="64" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <line x1="265" y1="108" x2="265" y2="88" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="340" y1="134" x2="408" y2="134" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <text x="374" y="125" textAnchor="middle" fill="var(--text-subtle)" fontSize="9">wraps</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Target** — 클라이언트가 기대하는 인터페이스
+- **Adapter** — Target 구현 + Adaptee 위임으로 변환
+- **Adaptee** — 기존/외부의 호환 안 되는 클래스
+
+### 4. Before → After
+
+**Before — 직접 결합**
+
+```java
+class Order{
+  TossSdk sdk;
+  void pay(){
+    sdk.requestPay(...); // 토스 전용 호출
+  } // SDK 교체 시 전부 수정
+}
+```
+
+**After — 인터페이스로 변환**
+
+```java
+class TossAdapter implements PayGateway{
+  private final TossSdk sdk;
+  public Result pay(Money m){
+    return map(sdk.requestPay(...));
+  }
+}
+```
+
+### 5. 현대 Java / Spring에서
+
+- **실사용처** — `InputStreamReader`(byte→char), `Arrays.asList`(배열→List 뷰), Spring MVC `HandlerAdapter`
+- Spring DI로 어댑터들을 인터페이스 타입 리스트로 주입받아 교체
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 기존 코드 수정 없이 통합
+- 변환 책임을 한 곳에 격리
+
+**트레이드오프**
+
+- 어댑터 클래스 증가
+- 변환 계층의 미세 오버헤드
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **vs Facade** — Adapter는 *인터페이스 변환*(맞추기), Facade는 *단순화*(줄이기)
+- **vs Decorator** — Adapter는 인터페이스를 바꾸고, Decorator는 같은 인터페이스로 기능을 더함
+
+## Decorator (데코레이터) · 구조 ★★★ 자주 · 직접 구현
+
+> 객체를 같은 인터페이스의 래퍼로 감싸, 상속 없이 동적으로 책임(기능)을 덧붙인다.
+
+### 1. 이런 증상이면 쓴다
+
+- 기능 조합이 많아 상속으로는 **서브클래스가 폭발**한다 (압축×암호화×버퍼링…)
+- 핵심 로직은 두고 로깅·캐싱·검증 같은 부가 책임을 겹겹이 끼우고 싶다
+
+### 2. 구조
+
+<Figure caption="Decorator가 같은 Component를 품고 위임하며 기능을 덧붙인다">
+  <svg viewBox="0 0 600 200" fontFamily="var(--font-mono), monospace" role="img" aria-label="Decorator 구조">
+    <rect x="220" y="24" width="160" height="48" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="300" y="44" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface» Notifier</text>
+    <text x="300" y="62" textAnchor="middle" fill="var(--text-muted)" fontSize="10">send(msg)</text>
+    <rect x="40" y="130" width="150" height="48" rx="8" fill="rgba(70,200,176,.12)" stroke="#46c8b0" strokeWidth="1.3" />
+    <text x="115" y="159" textAnchor="middle" fill="var(--text)" fontSize="11">BaseNotifier</text>
+    <rect x="360" y="110" width="200" height="68" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="460" y="133" textAnchor="middle" fill="var(--text-muted)" fontSize="10" fontStyle="italic">«abstract» Decorator</text>
+    <text x="460" y="151" textAnchor="middle" fill="var(--text)" fontSize="11">- wrapped: Notifier</text>
+    <text x="460" y="167" textAnchor="middle" fill="var(--text-muted)" fontSize="9">SlackDecorator …</text>
+    <line x1="115" y1="130" x2="270" y2="72" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="430" y1="110" x2="330" y2="72" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="430" y1="120" x2="360" y2="60" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#diamond)" />
+    <text x="420" y="98" fill="var(--text-subtle)" fontSize="9">wraps</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Component** — 공통 인터페이스
+- **ConcreteComponent** — 기본 구현(감싸지는 핵심)
+- **Decorator** — Component를 품고 같은 인터페이스로 위임 + 기능 추가
+
+### 4. Before → After
+
+**Before — 서브클래스 폭발**
+
+```java
+EmailNotifier
+EmailSlackNotifier
+EmailSlackSmsNotifier
+// 조합마다 클래스…
+```
+
+**After — 래핑 합성**
+
+```java
+Notifier n =
+  new SlackDecorator(
+    new SmsDecorator(
+      new BaseNotifier()));
+n.send("alert"); // 3채널 발송
+```
+
+### 5. 현대 Java / Spring에서
+
+- **대표 예** — `java.io` 스트림(`BufferedReader`가 `Reader`를 감쌈)
+- `Collections.unmodifiableList`, `HttpServletRequestWrapper`
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 런타임 조합·중첩 자유
+- 단일 책임 분리 (SRP)
+
+**트레이드오프**
+
+- 래퍼가 많아지면 디버깅·추적 난해
+- 래핑 순서에 의미가 생김
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **vs Proxy** — Decorator는 *기능 추가*(여러 겹), Proxy는 *접근 제어*(보통 1겹)
+- **vs Adapter** — 인터페이스 유지(Decorator) vs 변경(Adapter)
+
+## Proxy (프록시) · 구조 ★★★ 자주 · AOP가 핵심
+
+> 실제 객체에 대한 대리자를 두어, 같은 인터페이스로 접근을 가로채고 제어한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 실제 객체 호출 전후로 **공통 처리**가 필요하다 — 트랜잭션, 권한, 캐싱, 로깅
+- 비싼 객체를 **지연 로딩**하거나, 원격 객체를 로컬처럼 다루고 싶다
+
+### 2. 구조
+
+<Figure caption="Proxy가 접근을 제어한 뒤 RealService에 위임한다">
+  <svg viewBox="0 0 600 170" fontFamily="var(--font-mono), monospace" role="img" aria-label="Proxy 구조">
+    <rect x="220" y="20" width="160" height="46" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="300" y="40" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface» Service</text>
+    <text x="300" y="57" textAnchor="middle" fill="var(--text-muted)" fontSize="10">run()</text>
+    <rect x="60" y="118" width="180" height="48" rx="8" fill="rgba(70,200,176,.12)" stroke="#46c8b0" strokeWidth="1.3" />
+    <text x="150" y="141" textAnchor="middle" fill="var(--text)" fontSize="11">ServiceProxy</text>
+    <text x="150" y="157" textAnchor="middle" fill="var(--text-muted)" fontSize="9">tx/auth/cache</text>
+    <rect x="360" y="118" width="180" height="48" rx="8" fill="rgba(70,200,176,.12)" stroke="#46c8b0" strokeWidth="1.3" />
+    <text x="450" y="146" textAnchor="middle" fill="var(--text)" fontSize="11">RealService</text>
+    <line x1="150" y1="118" x2="270" y2="66" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="450" y1="118" x2="330" y2="66" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="240" y1="142" x2="358" y2="142" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <text x="299" y="133" textAnchor="middle" fill="var(--text-subtle)" fontSize="9">위임</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Subject** — Proxy와 RealSubject 공통 인터페이스
+- **Proxy** — 접근 제어 후 RealSubject에 위임
+- **RealSubject** — 실제 작업 수행
+
+### 4. Before → After
+
+**Before — 횡단 관심사 산재**
+
+```java
+void order(){
+  tx.begin(); auth.check();
+  real.order();      // 핵심
+  tx.commit();       // 모든 메서드 반복
+}
+```
+
+**After — 프록시가 가로챔**
+
+```java
+@Transactional
+public void order(){
+  real.order();  // 핵심만
+}
+// Spring이 프록시 생성·tx 주입
+```
+
+### 5. 현대 Java / Spring에서
+
+- **Spring AOP** — `@Transactional`, `@Cacheable`, `@Async`는 전부 프록시 기반
+- **JPA 지연 로딩** — 연관 엔티티를 프록시로 두고 접근 시 초기화
+- 구현 — JDK Dynamic Proxy(인터페이스) / CGLIB(클래스 상속)
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 핵심 로직과 횡단 관심사 분리
+- 지연·원격·보안 투명하게
+
+**트레이드오프**
+
+- 호출 흐름 추적 어려움(self-invocation 함정)
+- 프록시 생성 비용·디버깅 복잡
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **vs Decorator** — 의도가 핵심. 접근 제어(Proxy) vs 기능 추가(Decorator)
+- **Spring 함정** — 같은 빈 내부 메서드 호출은 프록시를 안 거쳐 `@Transactional` 무효
+
+## Facade (퍼사드) · 구조 ★★★ 자주(무의식적으로)
+
+> 복잡한 서브시스템 위에 단순화된 단일 진입점을 제공한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 한 작업을 하려고 클라이언트가 여러 객체를 **정해진 순서로** 직접 조율한다
+- 서브시스템 내부 구조가 호출부에 새어 나와 결합이 강하다
+
+### 2. 구조
+
+<Figure caption="Facade가 내부 호출 순서를 캡슐화해 단일 진입점을 제공한다">
+  <svg viewBox="0 0 600 180" fontFamily="var(--font-mono), monospace" role="img" aria-label="Facade 구조">
+    <rect x="30" y="66" width="120" height="48" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="90" y="95" textAnchor="middle" fill="var(--text)" fontSize="12">Client</text>
+    <rect x="200" y="60" width="140" height="60" rx="8" fill="rgba(70,200,176,.12)" stroke="#46c8b0" strokeWidth="1.3" />
+    <text x="270" y="86" textAnchor="middle" fill="var(--text)" fontSize="12">OrderFacade</text>
+    <text x="270" y="103" textAnchor="middle" fill="var(--text-muted)" fontSize="9">placeOrder()</text>
+    <rect x="420" y="20" width="150" height="34" rx="6" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.1" />
+    <text x="495" y="42" textAnchor="middle" fill="var(--text-muted)" fontSize="10">Inventory</text>
+    <rect x="420" y="73" width="150" height="34" rx="6" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.1" />
+    <text x="495" y="95" textAnchor="middle" fill="var(--text-muted)" fontSize="10">Payment</text>
+    <rect x="420" y="126" width="150" height="34" rx="6" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.1" />
+    <text x="495" y="148" textAnchor="middle" fill="var(--text-muted)" fontSize="10">Shipping</text>
+    <line x1="150" y1="90" x2="198" y2="90" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <line x1="340" y1="80" x2="418" y2="40" stroke="var(--text-subtle)" strokeWidth="1.1" markerEnd="url(#arr)" />
+    <line x1="340" y1="90" x2="418" y2="90" stroke="var(--text-subtle)" strokeWidth="1.1" markerEnd="url(#arr)" />
+    <line x1="340" y1="100" x2="418" y2="140" stroke="var(--text-subtle)" strokeWidth="1.1" markerEnd="url(#arr)" />
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Facade** — 고수준 작업을 노출, 내부 호출 순서 캡슐화
+- **Subsystem** — 실제 일을 하는 다수 클래스. Facade를 몰라도 됨
+
+### 4. Before → After
+
+**Before — 클라이언트가 조율**
+
+```java
+inventory.reserve(id);
+payment.charge(card);
+shipping.book(addr);
+// 순서·보상 로직이 호출부에
+```
+
+**After — 단일 진입점**
+
+```java
+orderFacade.placeOrder(req);
+// 내부 순서·예외처리 캡슐화
+```
+
+### 5. 현대 Java / Spring에서
+
+- **Spring `@Service` 계층**이 사실상 퍼사드 — 여러 repository·도메인 서비스를 묶음
+- `JdbcTemplate`(JDBC 퍼사드), SLF4J(로깅 퍼사드)
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 호출부 단순화·결합 감소
+- 서브시스템 변경 영향 격리
+
+**트레이드오프**
+
+- 퍼사드가 비대해지는 "갓 객체" 위험
+- 세밀한 제어가 필요하면 우회 호출 발생
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **vs Adapter** — Facade는 *단순화*(새 인터페이스, 보통 다수 객체), Adapter는 *변환*(기존 인터페이스에 맞춤)
+- 서브시스템을 가리지 않고 단지 줄여주는 게 핵심 — 인터페이스를 강제하지 않음
+
+## Composite (컴포지트) · 구조 ★★ 가끔
+
+> 객체를 트리로 구성해, 개별 객체(leaf)와 복합 객체(composite)를 동일하게 다룬다.
+
+### 1. 이런 증상이면 쓴다
+
+- 부분-전체 **계층 구조**를 다룬다 — 파일/폴더, 메뉴, 조직도, 댓글 트리
+- 잎 노드와 묶음 노드를 `instanceof`로 구분해 처리하는 분기가 반복된다
+
+### 2. 구조
+
+<Figure caption="Directory가 자식들을 보관하며 재귀로 위임한다">
+  <svg viewBox="0 0 600 190" fontFamily="var(--font-mono), monospace" role="img" aria-label="Composite 구조">
+    <rect x="210" y="24" width="180" height="48" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="300" y="44" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface» FileNode</text>
+    <text x="300" y="61" textAnchor="middle" fill="var(--text-muted)" fontSize="10">size()</text>
+    <rect x="60" y="130" width="150" height="44" rx="8" fill="rgba(70,200,176,.12)" stroke="#46c8b0" strokeWidth="1.3" />
+    <text x="135" y="157" textAnchor="middle" fill="var(--text)" fontSize="11">File (leaf)</text>
+    <rect x="370" y="120" width="180" height="56" rx="8" fill="rgba(70,200,176,.12)" stroke="#46c8b0" strokeWidth="1.3" />
+    <text x="460" y="144" textAnchor="middle" fill="var(--text)" fontSize="11">Directory</text>
+    <text x="460" y="161" textAnchor="middle" fill="var(--text-muted)" fontSize="9">children: List</text>
+    <line x1="135" y1="130" x2="270" y2="72" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="450" y1="120" x2="335" y2="72" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <path d="M460,120 C540,90 540,40 392,46" fill="none" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#diamond)" />
+    <text x="540" y="86" fill="var(--text-subtle)" fontSize="9">0..*</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Component** — 잎·복합 공통 인터페이스
+- **Leaf** — 자식 없는 말단
+- **Composite** — 자식 보관 + 재귀 위임
+
+### 4. Before → After
+
+**Before — 타입 분기**
+
+```java
+long size(Object n){
+  if(n instanceof Dir d){
+    // 자식 순회…
+  } else if(n instanceof File f){…}
+}
+```
+
+**After — 균일 재귀**
+
+```java
+long size(){              // Directory
+  return children.stream()
+    .mapToLong(FileNode::size).sum();
+}
+// File.size()는 자기 크기만
+```
+
+### 5. 현대 Java / Spring에서
+
+- **실사용처** — Swing/JavaFX 컴포넌트 트리, `java.io.File` 계층, Spring `Composite*`(예: `CompositeHealthContributor`)
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 잎·복합 동일 처리
+- 새 노드 타입 추가 쉬움
+
+**트레이드오프**
+
+- 공통 인터페이스가 leaf에 안 맞는 메서드 포함(타입 안전성↓)
+- 깊은 트리 재귀 비용
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **쓰지 말 때** — 구조가 평면이거나 깊이가 고정이면 과함
+- **+ Visitor** — 트리 위 연산 추가에 자주 짝지어 쓰임
+
+## Bridge (브리지) · 구조 ★ 드묾
+
+> 추상화와 구현을 분리해, 둘을 독립적으로 확장할 수 있게 한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 두 개의 변화 축이 있어 상속으로는 **N×M 클래스**가 생긴다 (예: 도형종류 × 렌더러)
+- 플랫폼/드라이버 같은 구현을 런타임에 갈아끼우고 싶다
+
+### 2. 구조
+
+<Figure caption="Shape(추상)와 Renderer(구현)가 has-a 다리로 연결되어 각자 확장된다">
+  <svg viewBox="0 0 600 180" fontFamily="var(--font-mono), monospace" role="img" aria-label="Bridge 구조">
+    <rect x="30" y="30" width="170" height="50" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="115" y="52" textAnchor="middle" fill="var(--text-muted)" fontSize="10" fontStyle="italic">«abstraction»</text>
+    <text x="115" y="69" textAnchor="middle" fill="var(--text)" fontSize="12">Shape</text>
+    <rect x="30" y="120" width="170" height="44" rx="8" fill="rgba(70,200,176,.12)" stroke="#46c8b0" strokeWidth="1.3" />
+    <text x="115" y="147" textAnchor="middle" fill="var(--text)" fontSize="11">Circle / Square</text>
+    <line x1="115" y1="120" x2="115" y2="80" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <rect x="380" y="30" width="190" height="50" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="475" y="52" textAnchor="middle" fill="#46c8b0" fontSize="10">«implementor»</text>
+    <text x="475" y="69" textAnchor="middle" fill="var(--text)" fontSize="12">Renderer</text>
+    <rect x="380" y="120" width="190" height="44" rx="8" fill="rgba(70,200,176,.12)" stroke="#46c8b0" strokeWidth="1.3" />
+    <text x="475" y="147" textAnchor="middle" fill="var(--text)" fontSize="11">SVG / Canvas Renderer</text>
+    <line x1="475" y1="120" x2="475" y2="80" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="200" y1="54" x2="378" y2="54" stroke="var(--text-subtle)" strokeWidth="1.4" markerEnd="url(#diamond)" />
+    <text x="289" y="45" textAnchor="middle" fill="var(--text-subtle)" fontSize="9">bridge (has-a)</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Abstraction** — 고수준 제어, Implementor 참조
+- **Implementor** — 저수준 동작 인터페이스
+- **Concrete\*** — 두 축이 각자 독립 확장
+
+### 4. Before → After
+
+**Before — 상속 폭발**
+
+```java
+CircleSvg, CircleCanvas,
+SquareSvg, SquareCanvas …
+// 도형×렌더러 = N×M
+```
+
+**After — 축 분리·합성**
+
+```java
+abstract class Shape{
+  protected final Renderer r; // bridge
+  abstract void draw();
+}
+// new Circle(new SvgRenderer())
+```
+
+### 5. 현대 Java / Spring에서
+
+- **JDBC** — `Connection` API(추상)와 벤더 `Driver`(구현)의 분리가 대표적
+- GUI 툴킷의 추상 컴포넌트 ↔ OS별 네이티브 peer(AWT) — 고전적 브리지 사례
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 두 축 독립 확장(조합 폭발 제거)
+- 구현 런타임 교체
+
+**트레이드오프**
+
+- 처음부터 간접 계층 추가 → 초기 복잡도↑
+- 변화 축이 하나면 불필요
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **vs Strategy** — 구조는 닮았지만 의도가 다름. Bridge는 *구조적 두 축 분리*(설계 시점), Strategy는 *알고리즘 교체*(행위)
+- **쓰지 말 때** — 변화 축이 미래에도 하나면 과설계
+
+## Flyweight (플라이웨이트) · 구조 ★ 드묾 · 성능 최적화
+
+> 다수의 유사 객체가 공유 가능한 상태를 함께 쓰게 해 메모리를 절약한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 동일하거나 거의 같은 객체가 **대량 생성**되어 메모리가 폭증한다
+- 객체 상태를 **공유 가능한 불변(intrinsic)**과 **문맥별(extrinsic)**로 나눌 수 있다
+
+### 2. 구조
+
+<Figure caption="Factory가 풀에서 공유 인스턴스를 재사용하고, 문맥별 상태는 호출 시 전달한다">
+  <svg viewBox="0 0 600 160" fontFamily="var(--font-mono), monospace" role="img" aria-label="Flyweight 구조">
+    <rect x="30" y="56" width="170" height="56" rx="8" fill="rgba(70,200,176,.12)" stroke="#46c8b0" strokeWidth="1.3" />
+    <text x="115" y="80" textAnchor="middle" fill="var(--text)" fontSize="12">FlyweightFactory</text>
+    <text x="115" y="97" textAnchor="middle" fill="var(--text-muted)" fontSize="9">pool: Map&lt;key,FW&gt;</text>
+    <rect x="290" y="30" width="160" height="44" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.4" strokeDasharray="5 4" />
+    <text x="370" y="57" textAnchor="middle" fill="var(--text)" fontSize="11">Flyweight (불변 공유)</text>
+    <rect x="290" y="100" width="160" height="44" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.2" />
+    <text x="370" y="121" textAnchor="middle" fill="var(--text-muted)" fontSize="10">extrinsic state</text>
+    <text x="370" y="136" textAnchor="middle" fill="var(--text-muted)" fontSize="9">(호출 시 전달)</text>
+    <line x1="200" y1="76" x2="288" y2="56" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <text x="244" y="58" textAnchor="middle" fill="var(--text-subtle)" fontSize="9">재사용</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Flyweight** — 공유되는 불변 상태(intrinsic) 보유
+- **Factory** — 풀에서 기존 인스턴스 반환·없으면 생성
+- **extrinsic** — 문맥별 상태는 메서드 인자로 전달
+
+### 4. Before → After
+
+**Before — 매번 생성**
+
+```java
+for(...) chars.add(
+  new Glyph('a', font)); // 수만 개
+// 같은 글리프 중복 적재
+```
+
+**After — 풀에서 공유**
+
+```java
+Glyph g = factory.get('a', font);
+g.draw(x, y); // 위치는 extrinsic
+// 'a'는 단 1개 인스턴스
+```
+
+### 5. 현대 Java / Spring에서
+
+- **대표 예** — `Integer.valueOf`의 −128~127 캐시, `String` 상수 풀(intern)
+- `Boolean.valueOf`, enum 상수 — 사실상 공유 인스턴스
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 대량 객체 메모리 급감
+
+**트레이드오프**
+
+- intrinsic/extrinsic 분리로 코드 복잡
+- 공유 객체는 반드시 불변이어야(스레드 안전)
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **쓰지 말 때** — 객체 수가 적거나 메모리 문제가 없으면 명백히 과함(조기 최적화)
+- JVM/라이브러리가 이미 캐시하는 경우가 많아 직접 구현은 드묾
+
+---
+
+# 행위 패턴 (Behavioral)
+
+객체 간 책임 분배와 알고리즘·상호작용을 다룬다. "누가 무엇을, 어떻게 협력하는가"를 설계한다.
+
+- Strategy ★★★
+- Observer ★★★
+- Template Method ★★★
+- Iterator ★★★
+- State ★★
+- Command ★★
+- Chain of Responsibility ★★
+- Mediator ★
+- Memento ★
+- Visitor ★
+- Interpreter ☆
+
+## Strategy (전략) · 행위 ★★★ 자주 · 직접 구현
+
+> 알고리즘군을 각각 캡슐화해 교체 가능하게 만든다. 런타임에 행동을 갈아끼운다.
+
+### 1. 이런 증상이면 쓴다
+
+- "종류"에 따른 `if-else` 분기가 한 메서드에서 계속 늘어난다
+- 새 종류 추가 때마다 기존 메서드를 수정해야 한다 (OCP 위반)
+
+### 2. 구조
+
+<Figure caption="Context는 PaymentStrategy 인터페이스로만 전략을 실행한다">
+  <svg viewBox="0 0 600 200" fontFamily="var(--font-mono), monospace" role="img" aria-label="Strategy 구조">
+    <rect x="30" y="80" width="170" height="56" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="115" y="104" textAnchor="middle" fill="var(--text)" fontSize="12">PaymentService</text>
+    <text x="115" y="121" textAnchor="middle" fill="var(--text-muted)" fontSize="9">«context»</text>
+    <rect x="360" y="78" width="210" height="60" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="465" y="102" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface» PaymentStrategy</text>
+    <text x="465" y="120" textAnchor="middle" fill="var(--text-muted)" fontSize="10">pay(amount)</text>
+    <line x1="200" y1="106" x2="358" y2="106" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <text x="279" y="98" textAnchor="middle" fill="var(--text-subtle)" fontSize="9">strategy</text>
+    <rect x="340" y="162" width="110" height="34" rx="7" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.3" />
+    <text x="395" y="184" textAnchor="middle" fill="var(--text)" fontSize="11">CardPayment</text>
+    <rect x="465" y="162" width="115" height="34" rx="7" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.3" />
+    <text x="522" y="184" textAnchor="middle" fill="var(--text)" fontSize="11">KakaoPayment</text>
+    <line x1="395" y1="162" x2="445" y2="138" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="522" y1="162" x2="490" y2="138" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Strategy** — 알고리즘 공통 인터페이스
+- **ConcreteStrategy** — 실제 알고리즘 구현
+- **Context** — 인터페이스로만 전략을 실행
+
+### 4. Before → After
+
+**Before — 분기 누적**
+
+```java
+void pay(String m, int amt){
+  if(m.equals("CARD")){…}
+  else if(m.equals("KAKAO")){…}
+  // 수단 추가마다 수정
+}
+```
+
+**After — 전략 분리**
+
+```java
+private final Map<String, PaymentStrategy> map;
+void pay(String m, int amt){
+  map.get(m).pay(amt); // 분기 소멸
+}
+```
+
+### 5. 현대 Java / Spring에서
+
+- **함수형 축약** — 메서드 1개 전략은 람다/`Function`로 대체
+- **Spring DI** — `List<Strategy>` 또는 빈 이름 키 `Map`을 자동 주입
+- **실사용처** — `Comparator`, `java.util.function`
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 새 전략 무수정 추가(OCP)
+- 알고리즘 단위 테스트
+
+**트레이드오프**
+
+- 전략마다 클래스 증가
+- 클라이언트가 전략 종류를 알아야 선택
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **쓰지 말 때** — 분기 2~3개 고정이면 `switch`가 낫다
+- **vs State** — 전환 주체. 외부 선택(Strategy) vs 객체 스스로 전이(State)
+- **vs Template Method** — 전체 합성 vs 일부 단계 상속
+
+## Observer (옵서버) · 행위 ★★★ 자주 · 이벤트의 기반
+
+> 한 객체의 상태 변화를, 의존하는 여러 객체에 자동으로 통지한다 (1:N).
+
+### 1. 이런 증상이면 쓴다
+
+- 한 사건 발생 후 **여러 후속 작업**이 필요하다 (주문 완료 → 알림·적립·통계)
+- 발행자가 구독자를 직접 호출해 결합이 강하고, 후속 작업 추가가 어렵다
+
+### 2. 구조
+
+<Figure caption="Subject가 변화 시 등록된 Observer들에게 일괄 통지한다">
+  <svg viewBox="0 0 600 180" fontFamily="var(--font-mono), monospace" role="img" aria-label="Observer 구조">
+    <rect x="40" y="60" width="170" height="60" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="125" y="84" textAnchor="middle" fill="var(--text)" fontSize="12">Subject</text>
+    <text x="125" y="101" textAnchor="middle" fill="var(--text-muted)" fontSize="9">observers · notify()</text>
+    <rect x="370" y="14" width="200" height="46" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="470" y="42" textAnchor="middle" fill="var(--text)" fontSize="11">«interface» Observer · update()</text>
+    <rect x="380" y="80" width="90" height="34" rx="6" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.2" />
+    <text x="425" y="102" textAnchor="middle" fill="var(--text)" fontSize="10">Mailer</text>
+    <rect x="480" y="80" width="90" height="34" rx="6" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.2" />
+    <text x="525" y="102" textAnchor="middle" fill="var(--text)" fontSize="10">Points</text>
+    <line x1="210" y1="78" x2="368" y2="40" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <text x="289" y="50" textAnchor="middle" fill="var(--text-subtle)" fontSize="9">notify</text>
+    <line x1="425" y1="80" x2="455" y2="60" stroke="var(--text-subtle)" strokeWidth="1.2" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="525" y1="80" x2="490" y2="60" stroke="var(--text-subtle)" strokeWidth="1.2" strokeDasharray="5 4" markerEnd="url(#tri)" />
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Subject** — 구독자 목록 관리 + 변화 시 통지
+- **Observer** — 통지 수신 인터페이스
+- **ConcreteObserver** — 통지에 반응해 동작
+
+### 4. Before → After
+
+**Before — 직접 호출 결합**
+
+```java
+void complete(Order o){
+  mailer.send(o);
+  points.add(o);
+  stats.record(o); // 추가마다 수정
+}
+```
+
+**After — 이벤트 발행**
+
+```java
+void complete(Order o){
+  publisher.publish(
+    new OrderCompleted(o));
+} // 구독자가 알아서 반응
+```
+
+### 5. 현대 Java / Spring에서
+
+- **Spring 이벤트** — `ApplicationEventPublisher` + `@EventListener` / `@TransactionalEventListener`
+- **리액티브** — Reactor `Flux`, RxJava의 구독 모델이 옵서버의 일반화
+- (레거시) `java.util.Observer`는 deprecated
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 발행자-구독자 느슨한 결합
+- 구독자 동적 추가/제거
+
+**트레이드오프**
+
+- 통지 순서·디버깅 추적 어려움
+- 구독 해제 누락 시 메모리 누수
+- 동기 통지 시 한 구독자 예외가 전체 영향
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **vs Mediator** — Observer는 *발행-구독(1:N)*, Mediator는 *중앙이 양방향 조율(N:N)*
+- **주의** — 메모리 이벤트는 롤링 배포 중 유실 가능 → 보장 필요 시 Outbox/CDC 고려
+
+## Template Method (템플릿 메서드) · 행위 ★★★ 자주 · 프레임워크 골격
+
+> 알고리즘의 골격을 상위 클래스에 고정하고, 일부 단계만 서브클래스가 채우게 한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 여러 구현이 **같은 흐름**을 갖는데 **일부 단계만** 다르다 (열기→처리→닫기)
+- 그 공통 흐름이 클래스마다 복붙되어 중복된다
+
+### 2. 구조
+
+<Figure caption="final run()이 흐름을 고정하고, 추상 훅만 서브클래스가 채운다">
+  <svg viewBox="0 0 600 180" fontFamily="var(--font-mono), monospace" role="img" aria-label="Template Method 구조">
+    <rect x="180" y="24" width="240" height="74" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="300" y="46" textAnchor="middle" fill="var(--text-muted)" fontSize="10" fontStyle="italic">«abstract» Importer</text>
+    <text x="300" y="65" textAnchor="middle" fill="#46c8b0" fontSize="10">+ final run() ← template</text>
+    <text x="300" y="82" textAnchor="middle" fill="var(--text-muted)" fontSize="9.5">#read()* #parse()* (hooks)</text>
+    <rect x="100" y="138" width="170" height="40" rx="7" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.3" />
+    <text x="185" y="163" textAnchor="middle" fill="var(--text)" fontSize="11">CsvImporter</text>
+    <rect x="330" y="138" width="170" height="40" rx="7" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.3" />
+    <text x="415" y="163" textAnchor="middle" fill="var(--text)" fontSize="11">JsonImporter</text>
+    <line x1="185" y1="138" x2="270" y2="98" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="415" y1="138" x2="330" y2="98" stroke="var(--text-subtle)" strokeWidth="1.3" strokeDasharray="5 4" markerEnd="url(#tri)" />
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **AbstractClass** — `final` 템플릿 메서드가 흐름 고정 + 추상 훅 선언
+- **ConcreteClass** — 훅(가변 단계)만 구현
+
+### 4. Before → After
+
+**Before — 흐름 중복**
+
+```java
+// CsvImporter, JsonImporter
+open(); validate();
+read(); save(); close();
+// 흐름 전체가 클래스마다 복붙
+```
+
+**After — 골격 + 훅**
+
+```java
+public final void run(){
+  open(); validate();
+  parse(read());  // 훅
+  save(); close();
+}
+protected abstract Data read();
+```
+
+### 5. 현대 Java / Spring에서
+
+- **실사용처** — `HttpServlet`(doGet/doPost), `AbstractList`, 수많은 Spring `Abstract*` 클래스
+- **콜백 변형** — `JdbcTemplate`은 골격을 갖고 가변 부분을 람다 콜백으로 받음(템플릿 메서드의 합성 버전)
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 공통 흐름 중복 제거
+- 흐름은 잠그고 변화점만 개방
+
+**트레이드오프**
+
+- 상속 강제 → 단일 상속 제약
+- 훅이 많아지면 흐름 파악 난해(역전된 제어)
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **vs Strategy** — Template Method는 *일부 단계를 상속*으로, Strategy는 *알고리즘 전체를 합성*으로 교체
+- **쓰지 말 때** — 가변점이 많거나 런타임 교체가 필요하면 Strategy/콜백이 유연
+
+## Iterator (이터레이터) · 행위 ★★★ 언어 내장 · 직접 구현 드묾
+
+> 집합체의 내부 표현을 노출하지 않고 원소를 순차적으로 접근한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 커스텀 컬렉션/트리를 **내부 구조 노출 없이** 순회시키고 싶다
+- 같은 컬렉션에 여러 순회 방식(정방향·역방향)을 제공하고 싶다
+
+### 2. 구조
+
+<Figure caption="Iterable이 Iterator를 만들어 내부 표현을 숨긴 채 순회를 제공한다">
+  <svg viewBox="0 0 600 160" fontFamily="var(--font-mono), monospace" role="img" aria-label="Iterator 구조">
+    <rect x="40" y="56" width="180" height="56" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="130" y="80" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface» Iterable</text>
+    <text x="130" y="98" textAnchor="middle" fill="var(--text-muted)" fontSize="10">iterator()</text>
+    <rect x="370" y="56" width="190" height="56" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="465" y="80" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface» Iterator</text>
+    <text x="465" y="98" textAnchor="middle" fill="var(--text-muted)" fontSize="10">hasNext() · next()</text>
+    <line x1="220" y1="84" x2="368" y2="84" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <text x="294" y="76" textAnchor="middle" fill="var(--text-subtle)" fontSize="9">creates</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Aggregate** — 이터레이터를 생성(`Iterable`)
+- **Iterator** — 순회 상태와 `hasNext/next` 보유
+
+### 4. Before → After
+
+**Before — 내부 노출**
+
+```java
+Object[] arr = bag.getRaw();
+for(int i=0; i<bag.count(); i++)
+  use(arr[i]); // 내부 구조 의존
+```
+
+**After — Iterable 구현**
+
+```java
+class Bag<T> implements Iterable<T>{…}
+for(T t : bag) use(t);
+// 내부 표현 은닉
+```
+
+### 5. 현대 Java / Spring에서
+
+- **언어가 제공** — `Iterable` 구현 시 for-each 자동 지원, `java.util.Iterator`
+- 대부분 직접 구현 대신 컬렉션/`Stream` 사용. 커스텀 자료구조 만들 때만 구현
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 내부 구조 은닉
+- 순회 알고리즘 분리·복수 제공
+
+**트레이드오프**
+
+- 단순 컬렉션엔 직접 구현 불필요
+- 순회 중 변경 시 `ConcurrentModification` 주의
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **쓰지 말 때** — 표준 컬렉션이면 이미 제공됨. 직접 구현은 거의 불필요
+
+## State (상태) · 행위 ★★ 가끔 · 상태머신 도메인
+
+> 객체의 내부 상태에 따라 행동을 바꾼다. 상태를 클래스로 분리하고 전이를 객체가 관리한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 상태값에 따라 같은 메서드가 다르게 동작하고, `switch(status)`가 곳곳에 흩어진다
+- 허용되지 않는 **상태 전이**를 막아야 한다 (주문: 결제 전엔 배송 불가)
+
+### 2. 구조
+
+<Figure caption="Context는 현재 State에 요청을 위임하고, State가 다음 상태로 전이한다">
+  <svg viewBox="0 0 600 190" fontFamily="var(--font-mono), monospace" role="img" aria-label="State 구조">
+    <rect x="40" y="74" width="160" height="56" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="120" y="98" textAnchor="middle" fill="var(--text)" fontSize="12">Order</text>
+    <text x="120" y="115" textAnchor="middle" fill="var(--text-muted)" fontSize="9">«context» state</text>
+    <rect x="360" y="72" width="200" height="58" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="460" y="95" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface» OrderState</text>
+    <text x="460" y="113" textAnchor="middle" fill="var(--text-muted)" fontSize="9.5">pay() ship() cancel()</text>
+    <line x1="200" y1="100" x2="358" y2="100" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <rect x="350" y="152" width="80" height="32" rx="6" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.2" />
+    <text x="390" y="173" textAnchor="middle" fill="var(--text)" fontSize="10">New</text>
+    <rect x="440" y="152" width="80" height="32" rx="6" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.2" />
+    <text x="480" y="173" textAnchor="middle" fill="var(--text)" fontSize="10">Paid</text>
+    <line x1="390" y1="152" x2="440" y2="130" stroke="var(--text-subtle)" strokeWidth="1.2" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="480" y1="152" x2="475" y2="130" stroke="var(--text-subtle)" strokeWidth="1.2" strokeDasharray="5 4" markerEnd="url(#tri)" />
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Context** — 현재 State 참조, 요청을 State에 위임
+- **State** — 상태별 행동 인터페이스
+- **ConcreteState** — 행동 수행 + 다음 상태로 전이
+
+### 4. Before → After
+
+**Before — 상태 분기 산재**
+
+```java
+void ship(){
+  if(status == NEW)
+    throw …; // 결제 전 금지
+  if(status == PAID) status = SHIPPED;
+} // 메서드마다 같은 분기
+```
+
+**After — 상태 객체 위임**
+
+```java
+void ship(){ state.ship(this); }
+// NewState.ship() → 예외
+// PaidState.ship() → SHIPPED 전이
+```
+
+### 5. 현대 Java / Spring에서
+
+- **도메인 상태머신** — 주문·결제·정산 라이프사이클에 적합
+- **Spring StateMachine**, 또는 `enum` 상태에 전이 로직을 부여하는 변형
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 상태별 로직 응집·분기 제거
+- 허용 전이 명시로 잘못된 전이 차단
+
+**트레이드오프**
+
+- 상태마다 클래스 증가
+- 전이 규칙이 여러 상태에 분산되어 전체 파악 어려움
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **vs Strategy** — 구조 동일. State는 *객체가 스스로 다음 상태로 전이*, Strategy는 *외부가 교체*
+- **쓰지 말 때** — 상태 2개·전이 단순하면 enum + 분기로 충분
+
+## Command (커맨드) · 행위 ★★ 가끔 · 람다로 경량화
+
+> 요청을 객체로 캡슐화해, 실행·취소·큐잉·로깅을 일반화한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 작업을 **나중에 실행**하거나 **큐에 쌓고** 싶다 (작업 큐, 스케줄)
+- **실행 취소(undo)**나 작업 이력 기록이 필요하다
+
+### 2. 구조
+
+<Figure caption="Invoker는 Command를 통해 Receiver의 작업을 간접 호출한다">
+  <svg viewBox="0 0 600 160" fontFamily="var(--font-mono), monospace" role="img" aria-label="Command 구조">
+    <rect x="30" y="58" width="130" height="48" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="95" y="87" textAnchor="middle" fill="var(--text)" fontSize="12">Invoker</text>
+    <rect x="230" y="52" width="150" height="56" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="305" y="76" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface» Command</text>
+    <text x="305" y="94" textAnchor="middle" fill="var(--text-muted)" fontSize="10">execute()</text>
+    <rect x="450" y="58" width="120" height="48" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="510" y="87" textAnchor="middle" fill="var(--text)" fontSize="11">Receiver</text>
+    <line x1="160" y1="80" x2="228" y2="80" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <line x1="380" y1="80" x2="448" y2="80" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <text x="414" y="72" textAnchor="middle" fill="var(--text-subtle)" fontSize="9">호출</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Command** — `execute()` (필요 시 `undo()`)
+- **Invoker** — 언제 실행할지 결정·큐 보관
+- **Receiver** — 실제 작업 수행 대상
+
+### 4. Before → After
+
+**Before — 즉시·직접 호출**
+
+```java
+editor.bold();
+editor.italic();
+// 취소·기록·지연 불가
+```
+
+**After — 명령 객체화**
+
+```java
+Deque<Command> history;
+void run(Command c){
+  c.execute(); history.push(c);
+}
+void undo(){ history.pop().undo(); }
+```
+
+### 5. 현대 Java / Spring에서
+
+- **함수형 축약** — 단순 명령은 `Runnable`/람다로 대체 (별도 클래스 불필요)
+- **실사용처** — `ExecutorService.submit(Runnable)`, 작업 큐, GUI 액션
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 실행 시점 분리(큐잉·지연)
+- undo/재실행/로깅 일반화
+
+**트레이드오프**
+
+- 명령마다 클래스 증가(람다로 완화)
+- undo 구현 시 상태 보관 복잡
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **쓰지 말 때** — 즉시 한 번 호출이면 직접 호출이 명확
+- **vs Strategy** — Command는 *"무엇을 할지"를 객체화(요청)*, Strategy는 *"어떻게 할지"를 교체(알고리즘)*
+
+## Chain of Responsibility (책임 연쇄) · 행위 ★★ 가끔 · 필터/인터셉터
+
+> 요청을 처리자 사슬에 따라 전달해, 누가 처리할지 동적으로 결정한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 요청을 **여러 단계 검사/처리**를 순서대로 통과시키고 싶다 (인증→로깅→검증→압축)
+- 처리 단계를 런타임에 추가·제거·재배열하고 싶다
+
+### 2. 구조
+
+<Figure caption="요청이 핸들러 사슬을 따라 흐르며 각자 처리하거나 다음으로 위임한다">
+  <svg viewBox="0 0 600 130" fontFamily="var(--font-mono), monospace" role="img" aria-label="Chain of Responsibility 구조">
+    <rect x="30" y="46" width="150" height="48" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="105" y="68" textAnchor="middle" fill="#46c8b0" fontSize="10">«abstract» Handler</text>
+    <text x="105" y="84" textAnchor="middle" fill="var(--text-muted)" fontSize="9">next · handle()</text>
+    <rect x="230" y="46" width="100" height="48" rx="8" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.2" />
+    <text x="280" y="74" textAnchor="middle" fill="var(--text)" fontSize="11">Auth</text>
+    <rect x="360" y="46" width="100" height="48" rx="8" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.2" />
+    <text x="410" y="74" textAnchor="middle" fill="var(--text)" fontSize="11">Validate</text>
+    <rect x="490" y="46" width="90" height="48" rx="8" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.2" />
+    <text x="535" y="74" textAnchor="middle" fill="var(--text)" fontSize="11">Log</text>
+    <line x1="180" y1="70" x2="228" y2="70" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <line x1="330" y1="70" x2="358" y2="70" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <line x1="460" y1="70" x2="488" y2="70" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Handler** — 다음 처리자 참조 + 처리 또는 위임
+- **ConcreteHandler** — 자기 책임이면 처리, 아니면 next로
+
+### 4. Before → After
+
+**Before — 거대 조건문**
+
+```java
+if(!auth(req)) return;
+if(!valid(req)) return;
+log(req); compress(req);
+// 순서·추가 시 메서드 수정
+```
+
+**After — 핸들러 사슬**
+
+```java
+abstract class Handler{
+  Handler next;
+  void handle(Req r){
+    if(next != null) next.handle(r);
+  }
+}
+```
+
+### 5. 현대 Java / Spring에서
+
+- **대표 예** — Servlet `Filter` 체인, Spring Security `FilterChain`, `HandlerInterceptor`
+- OkHttp/WebClient의 인터셉터 체인도 동일 구조
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 송신자-수신자 분리
+- 단계 동적 구성
+
+**트레이드오프**
+
+- 아무도 처리 안 할 위험
+- 긴 사슬은 흐름 추적·성능 부담
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **vs Decorator** — 구조 유사. CoR은 *처리/위임 결정(끊을 수 있음)*, Decorator는 *기능 추가(항상 위임)*
+
+## Mediator (중재자) · 행위 ★ 드묾
+
+> 객체들이 서로 직접 참조하지 않고 중재자를 통해서만 소통하게 해, N:N 결합을 제거한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 객체들이 서로를 직접 참조해 **거미줄(N:N)** 결합이 됐다 (UI 컴포넌트 간 연동)
+- 한 객체를 바꾸면 연결된 여러 객체를 줄줄이 수정해야 한다
+
+### 2. 구조
+
+<Figure caption="동료들은 서로를 모른 채 Mediator를 통해서만 소통한다">
+  <svg viewBox="0 0 600 170" fontFamily="var(--font-mono), monospace" role="img" aria-label="Mediator 구조">
+    <rect x="220" y="64" width="160" height="50" rx="8" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.3" />
+    <text x="300" y="86" textAnchor="middle" fill="var(--text)" fontSize="12">Mediator</text>
+    <text x="300" y="103" textAnchor="middle" fill="var(--text-muted)" fontSize="9">notify(sender, ev)</text>
+    <rect x="40" y="20" width="110" height="36" rx="6" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.2" />
+    <text x="95" y="42" textAnchor="middle" fill="var(--text-muted)" fontSize="10">Button</text>
+    <rect x="40" y="120" width="110" height="36" rx="6" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.2" />
+    <text x="95" y="142" textAnchor="middle" fill="var(--text-muted)" fontSize="10">TextBox</text>
+    <rect x="450" y="20" width="110" height="36" rx="6" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.2" />
+    <text x="505" y="42" textAnchor="middle" fill="var(--text-muted)" fontSize="10">Checkbox</text>
+    <rect x="450" y="120" width="110" height="36" rx="6" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.2" />
+    <text x="505" y="142" textAnchor="middle" fill="var(--text-muted)" fontSize="10">Label</text>
+    <line x1="150" y1="40" x2="222" y2="72" stroke="var(--text-subtle)" strokeWidth="1.2" />
+    <line x1="150" y1="138" x2="222" y2="106" stroke="var(--text-subtle)" strokeWidth="1.2" />
+    <line x1="450" y1="40" x2="378" y2="72" stroke="var(--text-subtle)" strokeWidth="1.2" />
+    <line x1="450" y1="138" x2="378" y2="106" stroke="var(--text-subtle)" strokeWidth="1.2" />
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Mediator** — 동료들의 상호작용을 중앙에서 조율
+- **Colleague** — 서로를 모르고 Mediator만 안다
+
+### 4. Before → After
+
+**Before — 상호 참조**
+
+```java
+class Button{
+  TextBox tb; Label lb; Checkbox cb;
+  void click(){ tb.clear(); lb.hide(); }
+} // 서로 다 알고 있음
+```
+
+**After — 중재자 경유**
+
+```java
+class Button{
+  Mediator m;
+  void click(){ m.notify(this, "click"); }
+} // 조율은 Mediator가
+```
+
+### 5. 현대 Java / Spring에서
+
+- **개념적 사촌** — 메시지 브로커/이벤트 버스가 컴포넌트 간 직접 참조를 끊는 중재자 역할(다만 Spring 이벤트는 보통 Observer로 분류)
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- N:N → N:1로 결합 단순화
+- 상호작용 로직 한곳에 응집
+
+**트레이드오프**
+
+- 중재자가 비대한 "갓 객체"가 되기 쉬움
+- 복잡도가 중재자로 이동
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **vs Observer** — Observer는 *발행-구독(보통 단방향 1:N)*, Mediator는 *중앙이 양방향 조율(N:N)*
+- **쓰지 말 때** — 객체가 적고 결합이 단순하면 직접 참조가 명확
+
+## Memento (메멘토) · 행위 ★ 드묾
+
+> 캡슐화를 깨지 않고 객체의 내부 상태를 외부에 저장했다가 나중에 복원한다.
+
+### 1. 이런 증상이면 쓴다
+
+- **실행 취소(undo)/스냅샷**이 필요하다 (에디터, 그리기 도구, 게임 세이브)
+- 상태를 저장하되 객체의 **내부 필드를 외부에 노출하고 싶지 않다**
+
+### 2. 구조
+
+<Figure caption="Originator가 Memento를 만들고 Caretaker는 내용을 모른 채 보관한다">
+  <svg viewBox="0 0 600 150" fontFamily="var(--font-mono), monospace" role="img" aria-label="Memento 구조">
+    <rect x="30" y="50" width="150" height="50" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="105" y="72" textAnchor="middle" fill="var(--text)" fontSize="12">Originator</text>
+    <text x="105" y="89" textAnchor="middle" fill="var(--text-muted)" fontSize="9">save() · restore()</text>
+    <rect x="240" y="52" width="130" height="46" rx="8" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.3" />
+    <text x="305" y="80" textAnchor="middle" fill="var(--text)" fontSize="11">Memento</text>
+    <rect x="430" y="50" width="140" height="50" rx="8" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeWidth="1.3" />
+    <text x="500" y="72" textAnchor="middle" fill="var(--text)" fontSize="12">Caretaker</text>
+    <text x="500" y="89" textAnchor="middle" fill="var(--text-muted)" fontSize="9">history stack</text>
+    <line x1="180" y1="75" x2="238" y2="75" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <text x="209" y="67" textAnchor="middle" fill="var(--text-subtle)" fontSize="9">creates</text>
+    <line x1="430" y1="75" x2="372" y2="75" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <text x="401" y="67" textAnchor="middle" fill="var(--text-subtle)" fontSize="9">보관</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Originator** — 상태를 가진 본체. 메멘토 생성·복원
+- **Memento** — 상태 스냅샷(불변). 내부는 Originator만 접근
+- **Caretaker** — 메멘토를 보관(내용은 모름)
+
+### 4. Before → After
+
+**Before — 외부가 필드 직접 보관**
+
+```java
+int savedX = e.x; int savedY = e.y;
+// 캡슐화 깨짐, 필드 늘면 줄줄이
+e.x = savedX; e.y = savedY; // 복원
+```
+
+**After — 스냅샷 객체**
+
+```java
+Memento m = editor.save();
+history.push(m);
+// …편집…
+editor.restore(history.pop());
+```
+
+### 5. 현대 Java / Spring에서
+
+- **스냅샷**을 불변 `record`로 표현하면 깔끔
+- 직렬화/역직렬화, undo 스택 구현에 개념 차용. 직접 패턴화는 드묾
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 캡슐화 유지하며 상태 저장
+- undo/롤백 구현 단순화
+
+**트레이드오프**
+
+- 스냅샷 잦으면 메모리·복사 비용
+- 큰 상태는 저장 비용 큼
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **+ Command** — undo를 Command의 `undo()`와 함께 쓰면 강력
+- **쓰지 말 때** — 복원 요구가 없으면 불필요
+
+## Visitor (방문자) · 행위 ★ 드묾 · sealed가 대안
+
+> 객체 구조는 그대로 두고, 새 연산을 방문자로 분리해 추가한다 (더블 디스패치).
+
+### 1. 이런 증상이면 쓴다
+
+- 요소 타입은 **안정적**인데, 그 위에서 돌릴 **연산이 자주 추가**된다 (AST에 평가·출력·검증…)
+- 요소마다 `instanceof`로 분기하는 연산 코드가 여기저기 흩어진다
+
+### 2. 구조
+
+<Figure caption="Element.accept(v)가 v.visit(this)를 호출하는 더블 디스패치">
+  <svg viewBox="0 0 600 170" fontFamily="var(--font-mono), monospace" role="img" aria-label="Visitor 구조">
+    <rect x="40" y="56" width="180" height="58" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="130" y="80" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface» Element</text>
+    <text x="130" y="98" textAnchor="middle" fill="var(--text-muted)" fontSize="10">accept(visitor)</text>
+    <rect x="380" y="56" width="180" height="58" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="470" y="80" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface» Visitor</text>
+    <text x="470" y="98" textAnchor="middle" fill="var(--text-muted)" fontSize="9.5">visit(Circle) visit(Square)</text>
+    <line x1="220" y1="85" x2="378" y2="85" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#arr)" />
+    <text x="299" y="77" textAnchor="middle" fill="var(--text-subtle)" fontSize="9">accept → visit</text>
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **Element** — `accept(v)` 구현 → `v.visit(this)` 호출
+- **Visitor** — 요소 타입별 `visit` 오버로드 = 새 연산
+
+### 4. Before → After
+
+**Before — instanceof 분기**
+
+```java
+double area(Shape s){
+  if(s instanceof Circle c) …;
+  if(s instanceof Square q) …;
+} // 연산마다 분기 복제
+```
+
+**After — sealed + switch (현대)**
+
+```java
+sealed interface Shape
+  permits Circle, Square {}
+double area(Shape s){
+  return switch(s){
+    case Circle c -> …;
+    case Square q -> …; };
+}
+```
+
+### 5. 현대 Java / Spring에서
+
+- **현대적 대안** — Java 17+ `sealed` + 패턴 매칭 `switch`가 더블 디스패치 보일러플레이트를 대체. 망라성도 컴파일러가 검사
+- **고전 사용처** — 컴파일러 AST 처리, 문서 트리 순회
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 구조 변경 없이 *연산* 추가 쉬움
+- 관련 연산을 한 방문자에 응집
+
+**트레이드오프**
+
+- 새 *Element* 추가 시 모든 Visitor 수정
+- 더블 디스패치 보일러플레이트, 가독성↓
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **쓰지 말 때** — 요소 타입이 자주 추가되면 최악(반대 상황). Java 17+면 sealed switch를 우선 고려
+
+## Interpreter (인터프리터) · 행위 ☆ 거의 안 씀 · 라이브러리로
+
+> 간단한 언어의 문법을 클래스로 표현하고, 그 문장을 해석하는 방법을 정의한다.
+
+### 1. 이런 증상이면 쓴다
+
+- 반복적으로 등장하는 **간단하고 안정적인 문법**을 해석해야 한다 (필터식, 규칙 표현)
+- 문법 규칙을 객체 트리로 표현하면 자연스러운 경우
+
+### 2. 구조
+
+<Figure caption="문법 규칙을 Expr 트리로 표현하고 재귀로 해석한다">
+  <svg viewBox="0 0 600 160" fontFamily="var(--font-mono), monospace" role="img" aria-label="Interpreter 구조">
+    <rect x="210" y="20" width="180" height="46" rx="8" fill="none" stroke="#46c8b0" strokeWidth="1.5" strokeDasharray="5 4" />
+    <text x="300" y="40" textAnchor="middle" fill="#46c8b0" fontSize="10">«interface» Expr</text>
+    <text x="300" y="57" textAnchor="middle" fill="var(--text-muted)" fontSize="10">interpret(ctx)</text>
+    <rect x="60" y="116" width="150" height="36" rx="6" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.2" />
+    <text x="135" y="139" textAnchor="middle" fill="var(--text)" fontSize="10">Number (terminal)</text>
+    <rect x="250" y="116" width="150" height="36" rx="6" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.2" />
+    <text x="325" y="139" textAnchor="middle" fill="var(--text)" fontSize="10">And (nonterminal)</text>
+    <rect x="440" y="116" width="120" height="36" rx="6" fill="rgba(189,143,224,.12)" stroke="#bd8fe0" strokeWidth="1.2" />
+    <text x="500" y="139" textAnchor="middle" fill="var(--text)" fontSize="10">Or</text>
+    <line x1="135" y1="116" x2="270" y2="66" stroke="var(--text-subtle)" strokeWidth="1.2" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="325" y1="116" x2="305" y2="66" stroke="var(--text-subtle)" strokeWidth="1.2" strokeDasharray="5 4" markerEnd="url(#tri)" />
+    <line x1="500" y1="116" x2="345" y2="66" stroke="var(--text-subtle)" strokeWidth="1.2" strokeDasharray="5 4" markerEnd="url(#tri)" />
+  </svg>
+</Figure>
+
+### 3. 구성요소 역할
+
+- **AbstractExpression** — `interpret()` 선언
+- **Terminal** — 문법의 잎(리터럴·변수)
+- **Nonterminal** — 규칙 조합(AND/OR), 하위 식 재귀 해석
+
+### 4. Before → After
+
+**Before — 직접 구현**
+
+```java
+// "true AND false" 평가용
+interface Expr{ boolean eval(); }
+record And(Expr a, Expr b)
+  implements Expr{ … }
+// 문법 커질수록 클래스 폭증
+```
+
+**After — 검증된 라이브러리**
+
+```java
+// Spring Expression Language
+Expression e = parser
+  .parseExpression("price > 100");
+boolean ok = e.getValue(ctx, Boolean.class);
+// 직접 구현보다 SpEL/ANTLR
+```
+
+### 5. 현대 Java / Spring에서
+
+- **직접 구현은 거의 안 함** — 문법이 조금만 커져도 **ANTLR** 같은 파서 생성기, **SpEL**, 정규식이 정답
+- 개념 이해용으로는 가치 있으나 실무 채택 빈도는 가장 낮음
+
+### 6. 장점 / 트레이드오프
+
+**장점**
+
+- 문법을 객체로 표현·확장
+- 규칙 단위 변경 용이
+
+**트레이드오프**
+
+- 문법 복잡해지면 클래스 폭증·유지보수 악몽
+- 성능·에러 처리 직접 구현 부담
+
+### 7. 언제 쓰지 말까 · 헷갈리는 패턴
+
+- **쓰지 말 때** — 거의 항상. 실무에선 파서 라이브러리를 먼저 검토
+- 트리 해석이라는 점에서 Composite + 재귀 순회와 구조가 겹침
+
+---
+
+## 헷갈리는 쌍, 한 줄로 가른다
+
+구조가 닮아 면접·리뷰에서 가장 자주 섞이는 쌍들. 각 패턴 7번 항목과 교차 연결된다.
+
+| 쌍 | 가르는 한 줄 |
+| --- | --- |
+| **Strategy vs State** | 구조는 쌍둥이. **전환 주체**가 다르다 — Strategy는 외부(클라이언트)가 선택, State는 객체 스스로 다음 상태로 전이. |
+| **Strategy vs Template Method** | 위임 범위. Strategy는 알고리즘 **전체를 합성**으로, Template Method는 **일부 단계를 상속**으로 교체. |
+| **Strategy vs Command** | 관심사. Strategy는 "**어떻게** 할지(알고리즘)", Command는 "**무엇을** 할지(요청 자체)"를 객체화해 큐잉·취소. |
+| **Factory Method vs Abstract Factory** | 생성 단위. 전자는 객체 **한 종류**를 서브클래스(상속)가 결정, 후자는 어울리는 **객체군**을 한 팩토리(합성)가 일괄 생성. |
+| **Builder vs Factory** | Builder는 **한 객체를 단계적으로** 조립(인자 많음), Factory류는 **어떤 구현을** 만들지 선택. |
+| **Decorator vs Proxy** | 의도. Decorator는 **기능 추가**(여러 겹), Proxy는 **접근 제어**(지연·권한·캐싱). 둘 다 같은 인터페이스로 감쌈. |
+| **Decorator vs Chain of Resp.** | 위임 방식. Decorator는 **항상 다음으로 위임**하며 살을 붙이고, CoR은 **처리하고 끊을 수** 있다. |
+| **Adapter vs Facade** | 목적. Adapter는 **인터페이스 변환**(맞추기), Facade는 **복잡도 단순화**(줄이기). |
+| **Bridge vs Strategy** | 층위. Bridge는 **구조적 두 축 분리**(설계 시점, 합성 고정), Strategy는 **행위 교체**(런타임). |
+| **Observer vs Mediator** | 소통 방향. Observer는 **발행-구독(1:N 단방향)**, Mediator는 **중앙이 N:N 양방향** 조율. |
+
+> **23개 완성.** 생성 5 · 구조 7 · 행위 11 모두 동일한 7단계 스키마로 작성했다. 범주 색(생성=골드·구조=틸·행위=바이올렛)과 ★ 빈도 표기, 다이어그램 범례가 전부 일관된다.
+
+대부분의 패턴은 SOLID — 특히 OCP와 DIP — 를 코드로 실현하는 수단이다. 패턴은 복잡도를 없애지 않는다. 옮길 뿐이다. 변화의 축이 실제로 존재할 때만 도입하라.
