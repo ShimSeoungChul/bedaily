@@ -13,7 +13,8 @@
       "Bash(rm /Users/com/IdeaProjects/bedaily/content/events/*.mdx)",
       "Bash(git commit *)",
       "Bash(pkill -f \"next dev\")",
-      "Bash(pkill -f \"next-server\")"
+      "Bash(pkill -f \"next-server\")",
+      "WebSearch"
     ]
   }
 }

@@ -9,7 +9,7 @@ published: true
 
 ## 개요
 
-Java 21에서 정식 출시된 **Virtual Threads**는 기존 플랫폼 스레드(OS 스레드)와 달리 JVM이 직접 스케줄링하는 경량 스레드입니다. Spring Boot 3.2부터 공식 지원이 추가됐습니다.
+Java 21에서 정식 출시된 **Virtual Threads**는, OS가 직접 스케줄링하는 플랫폼 스레드와 달리 JVM이 소수의 캐리어(플랫폼) 스레드 위에 다중화해 스케줄링하는 경량 스레드입니다. 블로킹이 발생하면 가상 스레드는 캐리어에서 내려오고(unmount), 캐리어는 다른 가상 스레드를 실행합니다. Spring Boot 3.2부터 공식 지원이 추가됐습니다.
 
 ## 기존 방식의 한계
 
@@ -28,6 +28,37 @@ public class UserController {
 ```
 
 I/O가 많은 워크로드에서는 스레드가 블로킹 상태로 대기하며 리소스를 낭비합니다.
+
+<Figure caption="플랫폼 스레드는 요청당 1개를 점유해 풀이 고갈되지만, 가상 스레드는 블로킹 시 캐리어에서 내려와 소수의 캐리어를 재사용한다">
+  <svg viewBox="0 0 760 270" fontFamily="ui-monospace, monospace" role="img" aria-label="플랫폼 스레드 대 가상 스레드 모델">
+    <rect x="14" y="20" width="356" height="234" rx="10" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <rect x="390" y="20" width="356" height="234" rx="10" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="32" y="44" fontSize="11" fill="#e07a6b" fontWeight="700">플랫폼 스레드 · 요청당 1 스레드</text>
+    <text x="408" y="44" fontSize="11" fill="#7fc99a" fontWeight="700">Virtual Threads · 캐리어에 다중화</text>
+    <text x="32" y="66" fontSize="9.5" fill="var(--text-muted)">요청 수천 건</text>
+    <rect x="32" y="74" width="70" height="150" rx="6" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="67" y="154" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">요청</text>
+    <text x="67" y="167" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">대기 큐</text>
+    <text x="200" y="66" fontSize="9.5" fill="var(--text-muted)">Tomcat 풀 (200 고정)</text>
+    <rect x="150" y="74" width="200" height="150" rx="6" fill="none" stroke="var(--border)" />
+    <rect x="162" y="86" width="176" height="20" rx="3" fill="#e07a6b33" stroke="#e07a6b" strokeOpacity=".5" /><text x="250" y="100" textAnchor="middle" fontSize="9" fill="#e07a6b">BLOCKED — I/O 대기</text>
+    <rect x="162" y="112" width="176" height="20" rx="3" fill="#e07a6b33" stroke="#e07a6b" strokeOpacity=".5" /><text x="250" y="126" textAnchor="middle" fontSize="9" fill="#e07a6b">BLOCKED — I/O 대기</text>
+    <rect x="162" y="138" width="176" height="20" rx="3" fill="#e07a6b33" stroke="#e07a6b" strokeOpacity=".5" /><text x="250" y="152" textAnchor="middle" fontSize="9" fill="#e07a6b">BLOCKED — I/O 대기</text>
+    <text x="250" y="184" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">200개 모두 점유되면</text>
+    <text x="250" y="198" textAnchor="middle" fontSize="9" fill="#e8a85c">→ 이후 요청은 큐잉</text>
+    <text x="408" y="66" fontSize="9.5" fill="var(--text-muted)">가상 스레드 수천 개</text>
+    <g fill="#7fc99a">
+      <circle cx="416" cy="84" r="4" /><circle cx="430" cy="84" r="4" /><circle cx="444" cy="84" r="4" /><circle cx="458" cy="84" r="4" /><circle cx="472" cy="84" r="4" /><circle cx="416" cy="100" r="4" /><circle cx="430" cy="100" r="4" /><circle cx="444" cy="100" r="4" /><circle cx="458" cy="100" r="4" /><circle cx="472" cy="100" r="4" />
+    </g>
+    <text x="408" y="130" fontSize="9" fill="var(--text-subtle)">블로킹 시 unmount ↓</text>
+    <rect x="556" y="86" width="170" height="120" rx="6" fill="none" stroke="var(--border)" />
+    <text x="641" y="104" textAnchor="middle" fontSize="9.5" fill="var(--text-muted)">캐리어 풀 (≈ CPU 코어)</text>
+    <rect x="572" y="116" width="138" height="22" rx="3" fill="#7fc99a33" stroke="#7fc99a" strokeOpacity=".55" /><text x="641" y="131" textAnchor="middle" fontSize="9" fill="#7fc99a">carrier — VT 실행 중</text>
+    <rect x="572" y="144" width="138" height="22" rx="3" fill="#7fc99a33" stroke="#7fc99a" strokeOpacity=".55" /><text x="641" y="159" textAnchor="middle" fontSize="9" fill="#7fc99a">carrier — 다음 VT 실행</text>
+    <text x="641" y="190" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">소수 캐리어로 수천 VT 처리</text>
+    <line x1="488" y1="100" x2="554" y2="120" stroke="var(--text-subtle)" strokeWidth="1.1" strokeDasharray="4 3" />
+  </svg>
+</Figure>
 
 ## Virtual Threads 활성화
 
@@ -61,9 +92,11 @@ public class VirtualThreadConfig {
 | 플랫폼 스레드 (200개) | 큐잉 발생 | 850ms |
 | Virtual Threads | 정상 처리 | 120ms |
 
+> 위 수치는 I/O 블로킹이 많은 워크로드를 가정한 예시이며, 실제 값은 워크로드·하드웨어·다운스트림 자원에 따라 달라집니다.
+
 ## 주의사항
 
-Virtual Threads는 **CPU-bound 작업**이 아닌 **I/O-bound 작업**에 효과적입니다. `synchronized` 블록 내부에서 블로킹 I/O를 사용하면 캐리어 스레드를 핀닝(pinning)하여 오히려 성능이 저하될 수 있습니다.
+Virtual Threads는 **CPU-bound 작업**이 아닌 **I/O-bound 작업**에 효과적입니다. `synchronized` 블록 안에서 블로킹하거나 네이티브 메서드(JNI/FFI)를 호출하면 캐리어 스레드를 핀닝(pinning)해 오히려 성능이 저하될 수 있습니다. 다만 **JDK 24(JEP 491)부터 `synchronized` 블로킹으로 인한 핀닝은 해소**됐습니다 — JDK 21~23에서는 `ReentrantLock` 사용을 권장합니다. 또한 다운스트림 자원(예: DB 커넥션 풀)이 병목이면 가상 스레드를 아무리 늘려도 처리량은 그 한계에 묶입니다.
 
 ## 마무리
 

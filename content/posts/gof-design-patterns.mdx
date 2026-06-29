@@ -230,7 +230,7 @@ abstract class ReportService{
 
 ### 5. 현대 Java / Spring에서
 
-- **실사용처** — `Calendar.getInstance()`, `NumberFormat.getInstance()`, `BeanFactory.getBean()`
+- **실사용처** — `Calendar.getInstance()`, `NumberFormat.getInstance()` (관용적으로 인용되는 예 — 엄밀히는 정적 팩토리다). `BeanFactory.getBean()`은 서비스 로케이터라 GoF 팩토리 메서드와 다르다
 - **주의** — 정적 팩토리(`List.of`, `Optional.of`)는 이름만 비슷, GoF 의도(*서브클래스 결정*)와 다름
 - Spring에선 DI가 생성을 대신해 직접 구현 빈도 낮음
 
@@ -390,7 +390,7 @@ Dialect d = f.dialect();
 
 ### 5. 현대 Java / Spring에서
 
-- **실사용처** — `DocumentBuilderFactory`, `SqlSessionFactory`(MyBatis), JDBC 드라이버 군
+- **실사용처** — JDBC 드라이버 군(한 벤더가 `Connection`·`Statement`·`ResultSet`을 일괄 제공), AWT `Toolkit`(OS별 위젯 peer 군 생성). 이름에 "Factory"가 붙은 `DocumentBuilderFactory`·`SqlSessionFactory`는 제품이 1종이라 사실 Factory Method에 가깝다
 - 실무에선 제품군 전환을 **DI 프로파일/조건부 빈**으로 푸는 경우가 더 많음
 
 ### 6. 장점 / 트레이드오프
@@ -1018,7 +1018,7 @@ g.draw(x, y); // 위치는 extrinsic
 
 ### 5. 현대 Java / Spring에서
 
-- **대표 예** — `Integer.valueOf`의 −128~127 캐시, `String` 상수 풀(intern)
+- **대표 예** — `Integer.valueOf` 캐시(기본 −128~127, 상한은 `-XX:AutoBoxCacheMax`로 확장 가능), `String` 상수 풀(intern)
 - `Boolean.valueOf`, enum 상수 — 사실상 공유 인스턴스
 
 ### 6. 장점 / 트레이드오프

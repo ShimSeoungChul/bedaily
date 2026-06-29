@@ -46,6 +46,27 @@ CascadeType.DELETE       // → CascadeType.REMOVE
 
 Hibernate 7에서 실제로 가장 많이 마주칠 변화다.
 
+<Figure caption="JPA 엔티티 생명주기 — Detached를 다시 관리 상태로 되돌리는 합법적 경로는 merge()뿐이고, Hibernate 7은 cascade PERSIST로 detached를 붙이면 예외를 던진다">
+  <svg viewBox="0 0 760 260" fontFamily="ui-monospace, monospace" role="img" aria-label="엔티티 생명주기 상태도">
+    <defs>
+      <marker id="hbA" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="var(--text-subtle)" /></marker>
+      <marker id="hbG" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#7fc99a" /></marker>
+      <marker id="hbR" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#e07a6b" /></marker>
+    </defs>
+    <rect x="40" y="44" width="170" height="52" rx="8" fill="var(--bg-muted)" stroke="var(--border)" /><text x="125" y="68" textAnchor="middle" fontSize="11" fill="var(--text)">Transient</text><text x="125" y="84" textAnchor="middle" fontSize="8.5" fill="var(--text-subtle)">new · 컨텍스트 밖</text>
+    <rect x="290" y="102" width="180" height="58" rx="8" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".55" /><text x="380" y="128" textAnchor="middle" fontSize="11" fill="#56c7d6" fontWeight="600">Managed</text><text x="380" y="145" textAnchor="middle" fontSize="8.5" fill="var(--text-muted)">컨텍스트가 추적</text>
+    <rect x="560" y="44" width="170" height="52" rx="8" fill="var(--bg-muted)" stroke="var(--border)" /><text x="645" y="68" textAnchor="middle" fontSize="11" fill="var(--text)">Detached</text><text x="645" y="84" textAnchor="middle" fontSize="8.5" fill="var(--text-subtle)">컨텍스트에서 분리</text>
+    <rect x="290" y="198" width="180" height="46" rx="8" fill="var(--bg-muted)" stroke="var(--border)" /><text x="380" y="226" textAnchor="middle" fontSize="11" fill="var(--text)">Removed</text>
+    <line x1="180" y1="90" x2="298" y2="114" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#hbA)" /><text x="224" y="92" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">persist()</text>
+    <line x1="214" y1="150" x2="288" y2="140" stroke="var(--text-subtle)" strokeWidth="1.1" markerEnd="url(#hbA)" /><text x="244" y="166" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">find()/JPQL</text>
+    <line x1="470" y1="120" x2="566" y2="86" stroke="#e8a85c" strokeWidth="1.2" markerEnd="url(#hbA)" /><text x="520" y="110" textAnchor="middle" fontSize="9" fill="#e8a85c">detach·clear·close</text>
+    <path d="M566,74 C474,72 470,104 474,128" fill="none" stroke="#7fc99a" strokeWidth="1.3" markerEnd="url(#hbG)" /><text x="556" y="148" textAnchor="middle" fontSize="9" fill="#7fc99a">merge() → 새 관리본</text>
+    <line x1="380" y1="160" x2="380" y2="196" stroke="#e07a6b" strokeWidth="1.2" markerEnd="url(#hbR)" /><text x="412" y="182" textAnchor="middle" fontSize="9" fill="#e07a6b">remove()</text>
+    <text x="645" y="116" textAnchor="middle" fontSize="8.5" fill="#e07a6b">lock()·refresh()·cascade PERSIST</text>
+    <text x="645" y="129" textAnchor="middle" fontSize="8.5" fill="#e07a6b">→ 예외 (merge 먼저)</text>
+  </svg>
+</Figure>
+
 ```java filename="DetachedEntityService.java"
 // ❌ Hibernate 7에서 EntityExistsException
 Parent parent = session.find(Parent.class, parentId);

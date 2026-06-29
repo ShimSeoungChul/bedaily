@@ -53,11 +53,11 @@ spec:
 
 ## readinessProbe 필수 설정
 
-신규 파드가 `Ready` 상태가 되기 전까지 kube-proxy는 서비스 엔드포인트에 추가하지 않습니다. Spring Boot라면 Actuator의 readiness 엔드포인트를 활용하세요.
+신규 파드가 `Ready` 상태가 되기 전까지 EndpointSlice 컨트롤러는 해당 파드를 엔드포인트에 추가하지 않습니다(kube-proxy는 이 EndpointSlice 변경을 감지해 각 노드의 라우팅 규칙을 갱신합니다). Spring Boot라면 Actuator의 readiness 엔드포인트를 활용하세요.
 
 ```java
-// Spring Boot 2.3+는 자동 활성화
-// application.yml
+// 쿠버네티스 환경이 감지되면 readiness/liveness 그룹이 자동 노출됨
+// (아래는 그 외 환경에서 강제로 켜는 설정) — application.yml
 management:
   endpoint:
     health:
@@ -67,7 +67,7 @@ management:
 
 ## preStop 훅으로 graceful shutdown
 
-파드가 `Terminating` 상태가 되면 kube-proxy가 엔드포인트를 제거하기까지 수 초의 지연이 있습니다. `preStop` 훅에서 짧게 sleep을 주면 이 틈새를 메울 수 있습니다.
+파드가 `Terminating` 상태가 되면 엔드포인트에서 제거되지만, 그 변경이 모든 노드의 kube-proxy까지 전파되기까지 수 초의 지연이 있습니다. `preStop` 훅에서 짧게 sleep을 주면 이 틈새를 메울 수 있습니다.
 
 ```yaml
 lifecycle:
@@ -77,6 +77,30 @@ lifecycle:
 ```
 
 JVM 서버라면 추가로 `terminationGracePeriodSeconds`를 애플리케이션 shutdown 시간보다 넉넉하게 설정해두세요.
+
+<Figure caption="롤링 업데이트 한 사이클 — 신규 파드는 Ready된 뒤에야 트래픽을 받고, 구형 파드는 엔드포인트에서 빠진 뒤 preStop으로 전파 지연을 흡수한다">
+  <svg viewBox="0 0 760 250" fontFamily="ui-monospace, monospace" role="img" aria-label="롤링 업데이트 타임라인">
+    <defs><marker id="k8sA" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#e07a6b" /></marker></defs>
+    <text x="18" y="64" fontSize="11" fill="var(--text-muted)">신규 v2</text>
+    <text x="18" y="136" fontSize="11" fill="var(--text-muted)">구형 v1</text>
+    <rect x="110" y="44" width="215" height="42" rx="7" fill="#e8a85c1f" stroke="#e8a85c" strokeOpacity=".55" />
+    <text x="217" y="63" textAnchor="middle" fontSize="10.5" fill="#e8a85c">생성 · NotReady</text>
+    <text x="217" y="78" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">엔드포인트 제외 (트래픽 ✗)</text>
+    <rect x="325" y="44" width="405" height="42" rx="7" fill="#7fc99a1f" stroke="#7fc99a" strokeOpacity=".6" />
+    <text x="527" y="63" textAnchor="middle" fontSize="10.5" fill="#7fc99a">Ready · 트래픽 수신</text>
+    <text x="527" y="78" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">readinessProbe 통과 → EndpointSlice 추가</text>
+    <rect x="110" y="116" width="335" height="42" rx="7" fill="#7fc99a1f" stroke="#7fc99a" strokeOpacity=".6" />
+    <text x="277" y="141" textAnchor="middle" fontSize="10.5" fill="#7fc99a">Ready · 트래픽 수신</text>
+    <rect x="445" y="116" width="165" height="42" rx="7" fill="#e8a85c1f" stroke="#e8a85c" strokeOpacity=".55" />
+    <text x="527" y="135" textAnchor="middle" fontSize="10" fill="#e8a85c">Terminating · preStop 5s</text>
+    <text x="527" y="150" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">엔드포인트에서 제거</text>
+    <rect x="610" y="116" width="120" height="42" rx="7" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="670" y="141" textAnchor="middle" fontSize="10" fill="var(--text-muted)">SIGTERM → 종료</text>
+    <line x1="490" y1="200" x2="490" y2="160" stroke="#e07a6b" strokeWidth="1" strokeDasharray="3 3" markerEnd="url(#k8sA)" />
+    <text x="490" y="216" textAnchor="middle" fontSize="9.5" fill="#e07a6b">엔드포인트 전파 지연</text>
+    <text x="490" y="231" textAnchor="middle" fontSize="9.5" fill="var(--text-subtle)">preStop sleep가 이 틈을 흡수한다</text>
+  </svg>
+</Figure>
 
 ## 배포 확인
 
@@ -97,5 +121,5 @@ kubectl rollout undo deployment/api-server
 ## 정리
 
 - `maxUnavailable: 0` + `maxSurge: 1` 조합이 무중단의 기본
-- readinessProbe 없이는 트래픽이 준비 안 된 파드로 흘러 500 에러 발생
+- readinessProbe 없이는 트래픽이 준비 안 된 파드로 흘러 503 에러 발생
 - preStop sleep 5초로 kube-proxy 전파 지연 대응

@@ -11,16 +11,45 @@ published: true
 
 Retrieval-Augmented Generation(RAG)은 LLM의 고정된 학습 데이터 한계를 극복하기 위해, 질문과 관련된 문서를 실시간으로 검색해 프롬프트에 함께 넣어주는 패턴입니다. Spring AI는 이 과정을 Java 생태계에서 쉽게 구현할 수 있는 추상화를 제공합니다.
 
+RAG는 **빌드 타임의 적재**(ingestion)와 **런타임의 질의**(query) 두 단계로 나뉘며, 둘은 `VectorStore`를 공유합니다.
+
+<Figure caption="RAG 파이프라인 — 적재 단계가 문서를 임베딩해 VectorStore에 쌓고, 질의 단계가 유사 문서를 검색해 프롬프트를 보강한다">
+  <svg viewBox="0 0 760 300" fontFamily="ui-monospace, monospace" role="img" aria-label="RAG 적재·질의 파이프라인">
+    <defs><marker id="ragA" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="var(--text-subtle)" /></marker></defs>
+    <text x="20" y="28" fontSize="11" fill="#e8a85c" fontWeight="700">① 적재 (빌드 타임)</text>
+    <rect x="20" y="40" width="86" height="40" rx="7" fill="var(--bg-muted)" stroke="var(--border)" /><text x="63" y="64" textAnchor="middle" fontSize="10" fill="var(--text)">문서</text>
+    <rect x="124" y="40" width="96" height="40" rx="7" fill="var(--bg-muted)" stroke="var(--border)" /><text x="172" y="64" textAnchor="middle" fontSize="10" fill="var(--text)">TextReader</text>
+    <rect x="238" y="40" width="120" height="40" rx="7" fill="var(--bg-muted)" stroke="var(--border)" /><text x="298" y="60" textAnchor="middle" fontSize="10" fill="var(--text)">TokenTextSplitter</text><text x="298" y="73" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">청크 분할</text>
+    <rect x="376" y="40" width="120" height="40" rx="7" fill="#e8a85c1f" stroke="#e8a85c" strokeOpacity=".55" /><text x="436" y="60" textAnchor="middle" fontSize="10" fill="var(--text)">EmbeddingModel</text><text x="436" y="73" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">임베딩 생성</text>
+    <line x1="106" y1="60" x2="122" y2="60" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#ragA)" />
+    <line x1="220" y1="60" x2="236" y2="60" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#ragA)" />
+    <line x1="358" y1="60" x2="374" y2="60" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#ragA)" />
+    <line x1="496" y1="70" x2="600" y2="120" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#ragA)" /><text x="556" y="88" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">add()</text>
+    <rect x="600" y="110" width="140" height="78" rx="9" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".55" /><text x="670" y="143" textAnchor="middle" fontSize="11" fill="#56c7d6" fontWeight="600">VectorStore</text><text x="670" y="160" textAnchor="middle" fontSize="9.5" fill="var(--text-muted)">pgvector</text>
+    <text x="20" y="222" fontSize="11" fill="#56c7d6" fontWeight="700">② 질의 (런타임)</text>
+    <rect x="20" y="234" width="78" height="42" rx="7" fill="var(--bg-muted)" stroke="var(--border)" /><text x="59" y="259" textAnchor="middle" fontSize="10" fill="var(--text)">질문</text>
+    <rect x="116" y="234" width="150" height="42" rx="7" fill="var(--bg-muted)" stroke="var(--border)" /><text x="191" y="254" textAnchor="middle" fontSize="10" fill="var(--text)">유사 검색</text><text x="191" y="267" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">similaritySearch topK=4</text>
+    <rect x="284" y="234" width="170" height="42" rx="7" fill="#7fc99a1f" stroke="#7fc99a" strokeOpacity=".55" /><text x="369" y="254" textAnchor="middle" fontSize="10" fill="var(--text)">QuestionAnswerAdvisor</text><text x="369" y="267" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">프롬프트 보강</text>
+    <rect x="472" y="234" width="120" height="42" rx="7" fill="var(--bg-muted)" stroke="var(--border)" /><text x="532" y="259" textAnchor="middle" fontSize="10" fill="var(--text)">ChatClient → LLM</text>
+    <rect x="610" y="234" width="120" height="42" rx="7" fill="var(--bg-muted)" stroke="var(--border)" /><text x="670" y="259" textAnchor="middle" fontSize="10" fill="var(--text)">답변</text>
+    <line x1="98" y1="255" x2="114" y2="255" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#ragA)" />
+    <line x1="266" y1="255" x2="282" y2="255" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#ragA)" />
+    <line x1="454" y1="255" x2="470" y2="255" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#ragA)" />
+    <line x1="592" y1="255" x2="608" y2="255" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#ragA)" />
+    <line x1="216" y1="234" x2="640" y2="190" stroke="#56c7d6" strokeWidth="1.1" strokeDasharray="4 3" markerEnd="url(#ragA)" /><text x="430" y="210" textAnchor="middle" fontSize="9" fill="#56c7d6">유사 문서 조회</text>
+  </svg>
+</Figure>
+
 ## 의존성 추가
 
 ```xml
 <dependency>
   <groupId>org.springframework.ai</groupId>
-  <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
+  <artifactId>spring-ai-starter-model-openai</artifactId>
 </dependency>
 <dependency>
   <groupId>org.springframework.ai</groupId>
-  <artifactId>spring-ai-pgvector-store-spring-boot-starter</artifactId>
+  <artifactId>spring-ai-starter-vector-store-pgvector</artifactId>
 </dependency>
 ```
 
@@ -51,12 +80,13 @@ public class RagService {
     private final VectorStore vectorStore;
 
     public String ask(String question) {
-        var context = vectorStore.similaritySearch(
-            SearchRequest.query(question).withTopK(4)
-        );
+        // QuestionAnswerAdvisor가 유사 문서 검색과 프롬프트 보강을 모두 수행한다
+        var qaAdvisor = QuestionAnswerAdvisor.builder(vectorStore)
+            .searchRequest(SearchRequest.builder().topK(4).build())
+            .build();
 
         return chatClient.prompt()
-            .advisors(new QuestionAnswerAdvisor(vectorStore))
+            .advisors(qaAdvisor)
             .user(question)
             .call()
             .content();
@@ -94,11 +124,14 @@ spring:
 특정 카테고리 문서만 검색하려면:
 
 ```java
-var filter = FilterExpressionBuilder.eq("category", "devops");
+var b = new FilterExpressionBuilder();
+var filter = b.eq("category", "devops").build();
 vectorStore.similaritySearch(
-    SearchRequest.query(question)
-        .withFilterExpression(filter)
-        .withTopK(4)
+    SearchRequest.builder()
+        .query(question)
+        .filterExpression(filter)
+        .topK(4)
+        .build()
 );
 ```
 

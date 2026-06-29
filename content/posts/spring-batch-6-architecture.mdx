@@ -122,6 +122,34 @@ Spring Batch 6 — 생산자·소비자(producer–consumer)
    → 큐 용량이 곧 백프레셔. 동기화 경합 없이 처리량 안정
 ```
 
+<Figure caption="Spring Batch 6 청크 동시성 — 읽기 전담 producer가 크기 제한 큐를 채우고, consumer들이 꺼내 처리·쓰기한다. 큐 용량이 곧 백프레셔다">
+  <svg viewBox="0 0 760 220" fontFamily="ui-monospace, monospace" role="img" aria-label="생산자-소비자 청크 모델">
+    <defs>
+      <marker id="sb6A" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="var(--text-subtle)" /></marker>
+      <marker id="sb6B" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#e8a85c" /></marker>
+    </defs>
+    <rect x="24" y="80" width="140" height="56" rx="8" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".55" />
+    <text x="94" y="104" textAnchor="middle" fontSize="11" fill="#56c7d6" fontWeight="600">Producer</text>
+    <text x="94" y="120" textAnchor="middle" fontSize="9.5" fill="var(--text-muted)">read 전담</text>
+    <text x="325" y="62" textAnchor="middle" fontSize="9.5" fill="var(--text-muted)">bounded queue</text>
+    <rect x="240" y="74" width="170" height="68" rx="8" fill="var(--bg-muted)" stroke="var(--border)" />
+    <rect x="252" y="92" width="28" height="32" rx="3" fill="#7fc99a33" stroke="#7fc99a" strokeOpacity=".5" />
+    <rect x="286" y="92" width="28" height="32" rx="3" fill="#7fc99a33" stroke="#7fc99a" strokeOpacity=".5" />
+    <rect x="320" y="92" width="28" height="32" rx="3" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <rect x="354" y="92" width="28" height="32" rx="3" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <rect x="480" y="40" width="210" height="44" rx="8" fill="#7fc99a1f" stroke="#7fc99a" strokeOpacity=".55" /><text x="585" y="66" textAnchor="middle" fontSize="10" fill="#7fc99a">Consumer 1 · process → write</text>
+    <rect x="480" y="92" width="210" height="44" rx="8" fill="#7fc99a1f" stroke="#7fc99a" strokeOpacity=".55" /><text x="585" y="118" textAnchor="middle" fontSize="10" fill="#7fc99a">Consumer 2 · process → write</text>
+    <rect x="480" y="144" width="210" height="44" rx="8" fill="#7fc99a1f" stroke="#7fc99a" strokeOpacity=".55" /><text x="585" y="170" textAnchor="middle" fontSize="10" fill="#7fc99a">Consumer N · process → write</text>
+    <line x1="164" y1="108" x2="238" y2="108" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#sb6A)" />
+    <line x1="410" y1="100" x2="478" y2="62" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#sb6A)" />
+    <line x1="410" y1="108" x2="478" y2="114" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#sb6A)" />
+    <line x1="410" y1="116" x2="478" y2="166" stroke="var(--text-subtle)" strokeWidth="1.2" markerEnd="url(#sb6A)" />
+    <path d="M325,74 C325,28 94,30 94,78" fill="none" stroke="#e8a85c" strokeWidth="1.2" strokeDasharray="4 3" markerEnd="url(#sb6B)" />
+    <text x="210" y="22" textAnchor="middle" fontSize="9.5" fill="#e8a85c">큐가 차면 producer 정지 (백프레셔)</text>
+    <text x="325" y="172" textAnchor="middle" fontSize="9" fill="var(--text-subtle)">자리가 나면 재개</text>
+  </svg>
+</Figure>
+
 핵심은 백프레셔(backpressure)가 큐 용량으로 자연스럽게 해결된다는 점이다. 소비자가 느리면 큐가 차고, 큐가 차면 생산자가 알아서 멈춘다. 별도의 throttle 수치를 맞추거나 공유 상태를 동기화할 필요가 없다. 흐름이 단순해지니 처리량도 안정적이다.
 
 같은 JVM 안에서 청크를 병렬 처리하는 로컬 청킹도 이 모델 위에 올라간다.

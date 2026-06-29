@@ -232,7 +232,7 @@ shard = hash(_routing) % primary_shard_count
   <text x="28" y="103" fontSize="10" fontWeight="600" fill="#92400e" fontFamily="monospace">흐름 정리</text>
   <text x="28" y="119" fontSize="9" fill="#78350f" fontFamily="monospace">① Client → Coordinating: 아무 노드나 받을 수 있음</text>
   <text x="28" y="133" fontSize="9" fill="#78350f" fontFamily="monospace">② Coordinating → Primary: hash(_routing) % primary 수로 대상 결정</text>
-  <text x="28" y="147" fontSize="9" fill="#78350f" fontFamily="monospace">③ Primary → in-sync Replica: 병렬 복제, 모두 성공해야 ④ 응답</text>
+  <text x="28" y="147" fontSize="9" fill="#78350f" fontFamily="monospace">③ Primary → in-sync Replica: 병렬 복제, in-sync 응답(실패 시 격리) 후 ④ 응답</text>
 </svg>
 
 ### 읽기
