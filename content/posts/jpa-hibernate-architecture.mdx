@@ -419,6 +419,138 @@ private Long id;
 - **LAZY (지연)** — 연관 엔티티를 프록시로 두고, 실제 접근하는 순간 쿼리. `@OneToMany`·`@ManyToMany`의 기본값.
 - **EAGER (즉시)** — 엔티티 조회 시 연관까지 함께 로딩. `@ManyToOne`·`@OneToOne`의 기본값. **실무에선 모두 LAZY로 두고 필요할 때 fetch join을 권장.**
 
+### LAZY의 내부 구현 — 프록시와 컬렉션 래퍼
+
+"실제 접근하는 순간 쿼리"는 어떻게 가능한가? Hibernate는 **프록시 패턴**으로 이를 구현한다. 엔티티 단건(`@ManyToOne`)에는 **ByteBuddy로 생성한 프록시 서브클래스**를, 컬렉션(`@OneToMany`)에는 **PersistentCollection 래퍼**를 끼운다. 두 경우 모두 "접근 시점에 가로채서 초기화"라는 같은 원리다.
+
+#### 단건 연관 — 프록시 서브클래스
+
+`@ManyToOne(fetch = LAZY)`로 선언된 필드를 로딩하면 Hibernate는 실제 엔티티가 아니라 **해당 클래스를 상속한 프록시 객체**를 채워 넣는다. 이 프록시는 PK만 들고 있고, 나머지 필드는 비어 있다. getter를 호출하는 순간 인터셉터가 작동해 DB를 조회하고 실제 값을 채운다.
+
+<Figure caption="프록시 구조 — ByteBuddy가 엔티티를 상속한 서브클래스를 런타임에 생성">
+  <svg viewBox="0 0 760 290" fontFamily="ui-monospace, monospace" role="img" aria-label="Hibernate 프록시 서브클래스 구조">
+    <defs>
+      <marker id="pxArr" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="var(--text-subtle)" /></marker>
+      <marker id="pxArr2" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#56c7d6" /></marker>
+    </defs>
+    <rect x="40" y="20" width="300" height="100" rx="10" fill="var(--bg-muted)" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="190" y="46" fill="#56c7d6" fontSize="13" textAnchor="middle" fontWeight="700">Team (실제 엔티티)</text>
+    <text x="60" y="72" fill="var(--text-muted)" fontSize="11">- id: Long</text>
+    <text x="60" y="90" fill="var(--text-muted)" fontSize="11">- name: String</text>
+    <text x="60" y="108" fill="var(--text-muted)" fontSize="11">+ getName(): String</text>
+    <rect x="40" y="160" width="300" height="120" rx="10" fill="#e8a85c1f" stroke="#e8a85c" strokeOpacity=".55" />
+    <text x="190" y="186" fill="#e8a85c" fontSize="13" textAnchor="middle" fontWeight="700">Team$HibernateProxy (프록시)</text>
+    <text x="60" y="210" fill="var(--text-muted)" fontSize="11">- target: Team = null (미초기화)</text>
+    <text x="60" y="228" fill="var(--text-muted)" fontSize="11">- interceptor: LazyInitializer</text>
+    <text x="60" y="252" fill="#e8a85c" fontSize="11">+ getName(): → 인터셉터가 가로챔</text>
+    <text x="60" y="268" fill="var(--text-subtle)" fontSize="10">  초기화 안 됐으면 → SELECT → target 채움</text>
+    <line x1="190" y1="120" x2="190" y2="158" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#pxArr)" />
+    <text x="205" y="145" fill="var(--text-subtle)" fontSize="10">extends</text>
+    <rect x="440" y="42" width="280" height="88" rx="10" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="580" y="66" fill="var(--text)" fontSize="12" textAnchor="middle" fontWeight="600">ByteBuddy (런타임)</text>
+    <text x="460" y="88" fill="var(--text-muted)" fontSize="10.5">엔티티 클래스를 상속한</text>
+    <text x="460" y="104" fill="var(--text-muted)" fontSize="10.5">프록시 서브클래스를 바이트코드로</text>
+    <text x="460" y="120" fill="var(--text-muted)" fontSize="10.5">동적 생성 (cglib/javassist 대체)</text>
+    <line x1="440" y1="100" x2="342" y2="200" stroke="#56c7d6" strokeWidth="1.3" strokeDasharray="4 4" markerEnd="url(#pxArr2)" />
+    <text x="400" y="160" fill="#56c7d6" fontSize="10" textAnchor="middle">생성</text>
+  </svg>
+</Figure>
+
+#### 프록시 초기화 흐름
+
+프록시의 메서드가 호출되면 내부의 `LazyInitializer`가 초기화 여부를 확인한다. 아직 초기화되지 않았으면 Session을 통해 DB를 조회하고, 실제 엔티티 인스턴스(target)를 채운 뒤 결과를 위임한다. **Session이 닫힌 뒤 접근하면 `LazyInitializationException`이 터지는 이유**가 바로 이 구조에 있다.
+
+<Figure caption="프록시 접근 시 초기화 흐름 — Session이 살아 있어야 DB 조회 가능">
+  <svg viewBox="0 0 760 260" fontFamily="ui-monospace, monospace" role="img" aria-label="프록시 초기화 흐름 - 메서드 호출부터 DB 조회까지">
+    <defs>
+      <marker id="piArr" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="var(--text-subtle)" /></marker>
+      <marker id="piOk" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#7fc99a" /></marker>
+      <marker id="piErr" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#e07a6b" /></marker>
+    </defs>
+    <rect x="30" y="30" width="140" height="46" rx="8" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="100" y="58" fill="var(--text)" fontSize="11" textAnchor="middle" fontWeight="600">team.getName()</text>
+    <line x1="170" y1="53" x2="210" y2="53" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#piArr)" />
+    <rect x="214" y="22" width="200" height="62" rx="8" fill="#e8a85c1f" stroke="#e8a85c" strokeOpacity=".5" />
+    <text x="314" y="46" fill="#e8a85c" fontSize="11" textAnchor="middle" fontWeight="600">LazyInitializer</text>
+    <text x="314" y="66" fill="var(--text-muted)" fontSize="10" textAnchor="middle">initialized == false?</text>
+    <line x1="314" y1="84" x2="314" y2="112" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#piArr)" />
+    <text x="328" y="102" fill="var(--text-subtle)" fontSize="10">Yes</text>
+    <rect x="234" y="116" width="160" height="40" rx="8" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="314" y="141" fill="var(--text)" fontSize="11" textAnchor="middle">Session 열려 있나?</text>
+    <line x1="394" y1="136" x2="450" y2="136" stroke="#7fc99a" strokeWidth="1.3" markerEnd="url(#piOk)" />
+    <text x="422" y="128" fill="#7fc99a" fontSize="10">Yes</text>
+    <rect x="454" y="116" width="160" height="40" rx="8" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="534" y="141" fill="#56c7d6" fontSize="11" textAnchor="middle">SELECT 실행</text>
+    <line x1="534" y1="156" x2="534" y2="186" stroke="#7fc99a" strokeWidth="1.3" markerEnd="url(#piOk)" />
+    <rect x="454" y="190" width="160" height="46" rx="8" fill="#7fc99a1f" stroke="#7fc99a" strokeOpacity=".5" />
+    <text x="534" y="210" fill="#7fc99a" fontSize="11" textAnchor="middle" fontWeight="600">target 채움</text>
+    <text x="534" y="226" fill="var(--text-muted)" fontSize="10" textAnchor="middle">initialized = true</text>
+    <line x1="314" y1="156" x2="314" y2="190" stroke="#e07a6b" strokeWidth="1.3" markerEnd="url(#piErr)" />
+    <text x="328" y="176" fill="#e07a6b" fontSize="10">No</text>
+    <rect x="214" y="194" width="200" height="40" rx="8" fill="#e07a6b1f" stroke="#e07a6b" strokeOpacity=".5" />
+    <text x="314" y="218" fill="#e07a6b" fontSize="11" textAnchor="middle" fontWeight="600">LazyInitializationException</text>
+    <line x1="414" y1="53" x2="470" y2="53" stroke="#7fc99a" strokeWidth="1.3" markerEnd="url(#piOk)" />
+    <text x="440" y="44" fill="var(--text-subtle)" fontSize="10">이미 초기화</text>
+    <rect x="474" y="30" width="180" height="46" rx="8" fill="#7fc99a1f" stroke="#7fc99a" strokeOpacity=".5" />
+    <text x="564" y="50" fill="#7fc99a" fontSize="11" textAnchor="middle" fontWeight="600">target에 바로 위임</text>
+    <text x="564" y="66" fill="var(--text-muted)" fontSize="10" textAnchor="middle">DB 조회 없음</text>
+  </svg>
+</Figure>
+
+#### 컬렉션 연관 — PersistentCollection 래퍼
+
+`@OneToMany` 같은 컬렉션 필드는 프록시 서브클래스가 아니라 **Hibernate의 컬렉션 래퍼**로 감싸진다. `List`는 `PersistentBag`, `Set`은 `PersistentSet`으로 교체되며, 원리는 같다 — `.size()`, `.iterator()` 등 접근 시점에 SELECT가 나간다.
+
+<Figure caption="컬렉션 래퍼 — 자바 컬렉션을 Hibernate가 래핑하여 접근을 가로챈다">
+  <svg viewBox="0 0 760 240" fontFamily="ui-monospace, monospace" role="img" aria-label="PersistentCollection 래퍼 구조">
+    <defs>
+      <marker id="pcArr" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="var(--text-subtle)" /></marker>
+      <marker id="pcOk" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#56c7d6" /></marker>
+    </defs>
+    <rect x="30" y="30" width="240" height="90" rx="10" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="150" y="56" fill="var(--text)" fontSize="12" textAnchor="middle" fontWeight="600">Team 엔티티</text>
+    <text x="50" y="80" fill="var(--text-muted)" fontSize="11">@OneToMany(fetch = LAZY)</text>
+    <text x="50" y="98" fill="var(--text-muted)" fontSize="11">List&lt;Member&gt; members</text>
+    <line x1="270" y1="75" x2="310" y2="75" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#pcArr)" />
+    <text x="290" y="66" fill="var(--text-subtle)" fontSize="10">실제 타입</text>
+    <rect x="314" y="24" width="260" height="102" rx="10" fill="#e8a85c1f" stroke="#e8a85c" strokeOpacity=".55" />
+    <text x="444" y="50" fill="#e8a85c" fontSize="12" textAnchor="middle" fontWeight="700">PersistentBag</text>
+    <text x="334" y="72" fill="var(--text-muted)" fontSize="10.5">implements List (java.util)</text>
+    <text x="334" y="90" fill="var(--text-muted)" fontSize="10.5">- initialized: false</text>
+    <text x="334" y="108" fill="var(--text-muted)" fontSize="10.5">- session: SessionImpl 참조</text>
+    <line x1="444" y1="126" x2="444" y2="154" stroke="var(--text-subtle)" strokeWidth="1.3" markerEnd="url(#pcArr)" />
+    <text x="458" y="145" fill="var(--text-subtle)" fontSize="10">.size() / .get() / .iterator()</text>
+    <rect x="314" y="158" width="260" height="66" rx="10" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".45" />
+    <text x="444" y="182" fill="#56c7d6" fontSize="11" textAnchor="middle" fontWeight="600">초기화 트리거</text>
+    <text x="334" y="200" fill="var(--text-muted)" fontSize="10.5">SELECT * FROM member</text>
+    <text x="334" y="214" fill="var(--text-muted)" fontSize="10.5">WHERE team_id = ?</text>
+    <line x1="574" y1="191" x2="620" y2="191" stroke="#56c7d6" strokeWidth="1.3" markerEnd="url(#pcOk)" />
+    <rect x="624" y="168" width="110" height="46" rx="8" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="679" y="196" fill="var(--text)" fontSize="11" textAnchor="middle" fontWeight="600">DB</text>
+  </svg>
+</Figure>
+
+```java filename="LazyProxy.java"
+// 프록시 확인 — 초기화 전엔 프록시 타입
+Team team = member.getTeam();           // Team$HibernateProxy 반환
+System.out.println(team.getClass());    // class Team$HibernateProxy$xxx
+
+// getId()는 프록시가 PK를 이미 갖고 있어 초기화 안 됨
+team.getId();                           // SELECT 없음
+
+// getName()은 실제 데이터 접근 → 이 시점에 SELECT 발생
+team.getName();                         // SELECT * FROM team WHERE id=?
+
+// 컬렉션도 마찬가지 — 접근 시점에 초기화
+team.getMembers().size();               // SELECT * FROM member WHERE team_id=?
+
+// 초기화 여부 확인 유틸
+Hibernate.isInitialized(team);          // true/false
+Hibernate.initialize(team);            // 명시적 강제 초기화
+```
+
+> **왜 이 구조를 알아야 하나** — LAZY가 프록시라는 걸 모르면 세 가지 함정에 빠진다. ① `instanceof` 검사가 프록시 타입에 걸려 실패, ② 트랜잭션 밖에서 프록시 접근 시 `LazyInitializationException`, ③ 프록시를 루프에서 건드리면 N+1. 아래 N+1 절은 ③의 구체적 사례다.
+
 ### N+1 문제 — 어떻게 터지는가
 
 <Figure caption="1번 + N번 — 부모 1쿼리 뒤 자식마다 1쿼리씩 추가로 터진다">
