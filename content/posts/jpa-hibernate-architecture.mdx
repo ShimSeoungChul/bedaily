@@ -129,38 +129,62 @@ JPA의 거의 모든 개념은 이 4상태 사이의 전이(화살표) 위에 �
 
 (`save`·`update`의 함정과 `merge`와의 깊은 차이 — 재부착이냐 복사냐 — 는 아래 *표준 vs 고유* 박스에서 마저 다룬다.)
 
-<Figure caption="4상태 전이 — 실선은 메서드 호출, 점선은 조회로 인한 적재">
-  <svg viewBox="0 0 760 380" fontFamily="ui-monospace, monospace" role="img" aria-label="엔티티 생명주기 Transient Managed Detached Removed">
-    <defs><marker id="lcArr" markerWidth="10" markerHeight="10" refX="6" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="var(--text-muted)" /></marker></defs>
-    <rect x="40" y="40" width="200" height="70" rx="11" fill="var(--bg-muted)" stroke="var(--border)" />
-    <text x="140" y="72" fill="var(--text)" fontSize="15" textAnchor="middle" fontWeight="600">Transient</text>
-    <text x="140" y="92" fill="var(--text-subtle)" fontSize="11" textAnchor="middle">new — DB에 없음</text>
-    <rect x="280" y="40" width="200" height="70" rx="11" fill="#56c7d61f" stroke="#56c7d6" />
-    <text x="380" y="72" fill="#56c7d6" fontSize="15" textAnchor="middle" fontWeight="700">Managed</text>
-    <text x="380" y="92" fill="var(--text-muted)" fontSize="11" textAnchor="middle">컨텍스트가 추적 중</text>
-    <rect x="520" y="40" width="200" height="70" rx="11" fill="var(--bg-muted)" stroke="var(--border)" />
-    <text x="620" y="72" fill="var(--text)" fontSize="15" textAnchor="middle" fontWeight="600">Detached</text>
-    <text x="620" y="92" fill="var(--text-subtle)" fontSize="11" textAnchor="middle">컨텍스트에서 분리</text>
-    <rect x="280" y="270" width="200" height="70" rx="11" fill="#e07a6b1f" stroke="#e07a6b" strokeOpacity=".6" />
-    <text x="380" y="302" fill="#e07a6b" fontSize="15" textAnchor="middle" fontWeight="600">Removed</text>
-    <text x="380" y="322" fill="var(--text-muted)" fontSize="11" textAnchor="middle">삭제 예정</text>
-    <g stroke="var(--text-muted)" strokeWidth="1.5" fill="none">
-      <path d="M240,66 L278,66" markerEnd="url(#lcArr)" />
-      <path d="M480,82 L518,82" markerEnd="url(#lcArr)" />
-      <path d="M518,60 L482,60" markerEnd="url(#lcArr)" />
-      <path d="M380,110 L380,268" markerEnd="url(#lcArr)" />
-      <path d="M380,150 C300,180 300,40 376,40" markerEnd="url(#lcArr)" strokeDasharray="4 4" />
-      <path d="M280,290 C220,290 200,200 278,82" markerEnd="url(#lcArr)" strokeDasharray="4 4" />
+<Figure caption="4상태 전이 — 실선: 메서드 호출 · 점선: 암묵 전이(DB 적재 · 트랜잭션 종료)">
+  <svg viewBox="0 24 780 372" fontFamily="ui-monospace, monospace" role="img" aria-label="엔티티 생명주기 Transient Managed Detached Removed, DB에서 적재">
+    <defs>
+      <marker id="lcArr" markerWidth="10" markerHeight="10" refX="6" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="var(--text-muted)" /></marker>
+      <marker id="lcArrTeal" markerWidth="10" markerHeight="10" refX="6" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#56c7d6" fillOpacity=".55" /></marker>
+      <marker id="lcArrDash" markerWidth="10" markerHeight="10" refX="6" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="var(--text-subtle)" /></marker>
+    </defs>
+
+    <rect x="40" y="52" width="184" height="60" rx="11" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeOpacity=".6" strokeWidth="1.3" />
+    <text x="132" y="82" fill="var(--text)" fontSize="15" textAnchor="middle" fontWeight="600">Transient</text>
+    <text x="132" y="100" fill="var(--text-subtle)" fontSize="10.5" textAnchor="middle">new — DB에 없음</text>
+
+    <rect x="298" y="52" width="184" height="60" rx="11" fill="#56c7d61f" stroke="#56c7d6" strokeWidth="1.3" />
+    <text x="390" y="82" fill="#56c7d6" fontSize="15" textAnchor="middle" fontWeight="700">Managed</text>
+    <text x="390" y="100" fill="var(--text-muted)" fontSize="10.5" textAnchor="middle">컨텍스트가 추적 중</text>
+
+    <rect x="556" y="52" width="184" height="60" rx="11" fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeOpacity=".6" strokeWidth="1.3" />
+    <text x="648" y="82" fill="var(--text)" fontSize="15" textAnchor="middle" fontWeight="600">Detached</text>
+    <text x="648" y="100" fill="var(--text-subtle)" fontSize="10.5" textAnchor="middle">컨텍스트에서 분리</text>
+
+    <rect x="298" y="302" width="184" height="58" rx="11" fill="#e07a6b1f" stroke="#e07a6b" strokeOpacity=".6" strokeWidth="1.3" />
+    <text x="390" y="328" fill="#e07a6b" fontSize="15" textAnchor="middle" fontWeight="600">Removed</text>
+    <text x="390" y="346" fill="var(--text-muted)" fontSize="10.5" textAnchor="middle">삭제 예정 · flush 때 DELETE</text>
+
+    <g fill="var(--bg-muted)" stroke="var(--text-subtle)" strokeOpacity=".55" strokeWidth="1.2">
+      <path d="M70,322 V358 a48,11 0 0 0 96,0 V322" />
+      <ellipse cx="118" cy="322" rx="48" ry="11" fill="var(--bg-subtle)" />
     </g>
-    <text x="259" y="58" fill="#56c7d6" fontSize="11.5" textAnchor="middle" fontWeight="600">persist</text>
-    <text x="499" y="100" fill="var(--text-muted)" fontSize="11" textAnchor="middle">detach · clear · close</text>
-    <text x="500" y="52" fill="#e8a85c" fontSize="11.5" textAnchor="middle" fontWeight="600">merge</text>
-    <text x="398" y="200" fill="#e07a6b" fontSize="11.5" textAnchor="start" fontWeight="600">remove</text>
-    <text x="250" y="135" fill="var(--text-muted)" fontSize="11" textAnchor="middle">find / JPQL (DB→)</text>
-    <text x="190" y="220" fill="#56c7d6" fontSize="11" textAnchor="middle" fontWeight="600">persist</text>
-    <text x="190" y="236" fill="var(--text-subtle)" fontSize="10" textAnchor="middle">(flush 전)</text>
-    <text x="620" y="180" fill="var(--text-subtle)" fontSize="11" textAnchor="middle">트랜잭션 종료 후</text>
-    <text x="620" y="196" fill="var(--text-subtle)" fontSize="11" textAnchor="middle">자연히 Detached</text>
+    <text x="118" y="320" fill="var(--text-muted)" fontSize="12" textAnchor="middle" fontWeight="600">DB</text>
+    <text x="118" y="380" fill="var(--text-subtle)" fontSize="9.5" textAnchor="middle">영속성 컨텍스트 밖</text>
+
+    <g stroke="var(--text-muted)" strokeWidth="1.5" fill="none">
+      <path d="M224,82 L294,82" markerEnd="url(#lcArr)" />
+      <path d="M556,70 L486,70" markerEnd="url(#lcArr)" />
+      <path d="M482,94 L554,94" markerEnd="url(#lcArr)" />
+      <path d="M372,112 L372,298" markerEnd="url(#lcArr)" />
+    </g>
+
+    <path d="M408,300 L408,116" fill="none" stroke="#56c7d6" strokeOpacity=".5" strokeWidth="1.5" markerEnd="url(#lcArrTeal)" />
+
+    <g stroke="var(--text-subtle)" strokeWidth="1.4" fill="none" strokeDasharray="4 4">
+      <path d="M118,311 C150,250 240,168 324,112" markerEnd="url(#lcArrDash)" />
+      <path d="M470,112 C522,206 600,206 650,114" markerEnd="url(#lcArrDash)" />
+    </g>
+
+    <g paintOrder="stroke" stroke="var(--bg-subtle)" strokeWidth="3" strokeLinejoin="round" fontWeight="600">
+      <text x="259" y="74" fill="#56c7d6" fontSize="11.5" textAnchor="middle">persist</text>
+      <text x="521" y="60" fill="#e8a85c" fontSize="11.5" textAnchor="middle">merge</text>
+      <text x="518" y="132" fill="var(--text-muted)" fontSize="11" textAnchor="middle">detach · clear · close</text>
+      <text x="362" y="214" fill="#e07a6b" fontSize="11.5" textAnchor="end">remove</text>
+      <text x="418" y="206" fill="#56c7d6" fillOpacity=".9" fontSize="11.5" textAnchor="start">persist</text>
+      <text x="418" y="221" fill="var(--text-subtle)" fontSize="10" textAnchor="start">(flush 전)</text>
+      <text x="214" y="250" fill="var(--text-subtle)" fontSize="11" textAnchor="middle">find · JPQL</text>
+      <text x="560" y="160" fill="var(--text-subtle)" fontSize="11" textAnchor="middle">트랜잭션 종료 시</text>
+      <text x="560" y="175" fill="var(--text-subtle)" fontSize="9.5" textAnchor="middle">(자동 detached)</text>
+    </g>
   </svg>
 </Figure>
 
