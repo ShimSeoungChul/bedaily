@@ -17,7 +17,7 @@ published: true
 
 **Search Engine · Elasticsearch.** RDB의 `LIKE '%키워드%'`로는 한계가 명확하다. 풀스캔, 형태소 무시, 오타 취약, 연관도 없음. Elasticsearch가 이 문제를 어떻게 푸는지 — 클러스터 구조부터 역인덱스, 애널라이저, 한글 검색, 쿼리 DSL, 실전 프로젝트까지 핵심만 정리한다.
 
-*기준 — Elasticsearch 7.x · Spring Data Elasticsearch · 읽는 데 약 18분.*
+*기준 — Elasticsearch 7.x · Spring Data Elasticsearch.*
 
 ### 목차
 
@@ -65,7 +65,7 @@ Elasticsearch가 "분산" 엔진인 이유가 여기 있다. 데이터를 조각
   <svg viewBox="0 0 680 250" fontFamily="ui-monospace, monospace" role="img" aria-label="클러스터 안에 두 노드가 있고, 각 노드에 프라이머리 샤드와 다른 샤드의 레플리카가 분산 배치된 모습">
     <rect x="20" y="20" width="640" height="210" rx="12" fill="none" stroke="#56c7d6" strokeWidth="1.4" />
     <text x="40" y="46" fontSize="12.5" fill="#56c7d6" fontWeight="600">cluster</text>
-    <text x="560" y="46" fontSize="11" fill="var(--text-subtle)">index: 샤드 2개 + 레플리카 1세트</text>
+    <text x="640" y="46" fontSize="11" fill="var(--text-subtle)" textAnchor="end">index: 샤드 2개 + 레플리카 1세트</text>
     <rect x="44" y="64" width="290" height="146" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
     <text x="62" y="90" fontSize="11.5" fill="var(--text-muted)">node 1</text>
     <rect x="62" y="104" width="120" height="44" rx="7" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
