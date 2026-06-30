@@ -16,7 +16,10 @@
       "Bash(pkill -f \"next-server\")",
       "WebSearch",
       "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts,null,2\\)\\)\")",
-      "Skill(browse)"
+      "Skill(browse)",
+      "Bash(node -e \"const m=require\\('github-slugger'\\); console.log\\(typeof m, typeof \\(m.default||m\\)\\); const S=m.default||m; const s=new S\\(\\); console.log\\(JSON.stringify\\(s.slug\\('03 · 데이터 구조 — 인덱스 / 도큐먼트 / 필드'\\)\\)\\);\")",
+      "Bash(node -e \"const str='03 · 데이터 구조 — 인덱스 / 도큐먼트 / 필드'; console.log\\(JSON.stringify\\(str.toLowerCase\\(\\).trim\\(\\).replace\\(/\\\\s+/g,'-'\\).replace\\(/[^\\\\wÀ-ɏ가-힯-]/g,''\\).replace\\(/--+/g,'-'\\).replace\\(/^-+|-+\\\\$/g,''\\)\\)\\);\")",
+      "Bash(break)"
     ]
   }
 }
