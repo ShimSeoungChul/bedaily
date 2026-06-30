@@ -1,0 +1,549 @@
+---
+title: "Elasticsearch 핵심 정리 — 검색은 어떻게 빨라지는가"
+date: "2026-06-30"
+category: "Backend"
+tags: ["Elasticsearch", "검색엔진", "역인덱스", "Nori", "Spring Data Elasticsearch"]
+summary: "RDB의 LIKE '%키워드%'로는 한계가 명확하다. 풀스캔, 형태소 무시, 오타 취약, 연관도 없음. Elasticsearch가 이 문제를 어떻게 푸는지 — 클러스터 구조부터 역인덱스, 애널라이저, 한글 검색, 쿼리 DSL, 실전 프로젝트까지 핵심만 정리한다."
+published: true
+---
+
+{/* 다이어그램 공통 마커 정의 */}
+<svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden="true">
+  <defs>
+    <marker id="esArrTeal" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#56c7d6" /></marker>
+    <marker id="esArrAmber" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#e8a85c" /></marker>
+  </defs>
+</svg>
+
+**Search Engine · Elasticsearch.** RDB의 `LIKE '%키워드%'`로는 한계가 명확하다. 풀스캔, 형태소 무시, 오타 취약, 연관도 없음. Elasticsearch가 이 문제를 어떻게 푸는지 — 클러스터 구조부터 역인덱스, 애널라이저, 한글 검색, 쿼리 DSL, 실전 프로젝트까지 핵심만 정리한다.
+
+*기준 — Elasticsearch 7.x · Spring Data Elasticsearch · 읽는 데 약 18분.*
+
+### 목차
+
+1. Elasticsearch란 — 어디에 쓰나
+2. 클러스터 구조 — 노드 · 샤드 · 레플리카
+3. 데이터 구조 — 인덱스 / 도큐먼트 / 필드
+4. 역인덱스 — 검색이 빠른 진짜 이유
+5. 애널라이저 — 텍스트가 토큰이 되는 과정
+6. 한글 검색 — Nori Analyzer
+7. 매핑 — 데이터 타입과 text / keyword
+8. 쿼리 DSL — 자주 쓰는 검색들
+9. 실무 부가 기능 — 하이라이팅 · 정렬 · 자동완성
+10. 프로젝트 — 상품 검색 기능 구현 흐름
+11. 운영 — Spring Boot 연동과 Elastic Cloud
+
+## 01 · Elasticsearch란 — 어디에 쓰나
+
+Elasticsearch는 Apache Lucene 위에 만들어진 **분산 검색·분석 엔진**이다. JSON 도큐먼트를 저장하고, REST API로 검색한다. 단순 저장소가 아니라 "대량 텍스트를 빠르게 검색하고 집계하는 것"에 특화돼 있다.
+
+### 왜 RDB로는 부족한가
+
+- **풀스캔** — `LIKE '%키워드%'`는 인덱스를 못 타고 모든 행을 훑는다. 데이터가 늘수록 느려진다.
+- **형태소 무시** — "가을이"로 색인된 값을 "가을"로 못 찾는다. 단어를 쪼개는 개념이 없다.
+- **연관도 없음** — "얼마나 잘 맞는지" 점수가 없다. 검색 결과를 관련도순으로 줄 수 없다.
+- **확장 한계** — 대량 텍스트 검색을 수평 확장으로 분산하기 어렵다.
+
+### 주요 활용 사례
+
+- **전문 검색** — 상품 검색, 문서·게시글 검색, 자동완성. 쿠팡·깃허브 코드 검색 같은 곳.
+- **로그·메트릭 분석** — 서버 로그를 쌓고 실시간으로 집계·모니터링. 가장 흔한 쓰임새.
+- **ELK 스택** — *Elasticsearch*(저장·검색) + *Logstash / Beats*(수집) + *Kibana*(시각화). 로그 분석의 사실상 표준 조합.
+
+실습·관리 도구로는 Kibana의 Dev Tools를 쓴다. REST API를 GUI에서 바로 날려보고 결과를 확인할 수 있어 학습·디버깅이 편하다.
+
+## 02 · 클러스터 구조 — 노드 · 샤드 · 레플리카
+
+Elasticsearch가 "분산" 엔진인 이유가 여기 있다. 데이터를 조각내 여러 서버에 흩어 두고, 검색을 병렬로 처리한다. 네 가지 용어만 잡으면 된다.
+
+- **클러스터(Cluster)** — 함께 동작하는 노드들의 묶음. 하나의 검색 시스템 전체.
+- **노드(Node)** — Elasticsearch 인스턴스 하나. 보통 서버 한 대.
+- **샤드(Shard)** — 인덱스를 쪼갠 조각. 실제로는 Lucene 인덱스 하나다. 데이터를 여러 노드에 나눠 담아 **수평 확장과 병렬 검색**을 가능하게 한다.
+- **레플리카(Replica)** — 샤드의 복제본. 원본(프라이머리) 장애에 대비하고, 읽기 부하를 분산한다. 프라이머리와 **다른 노드**에 둬야 의미가 있다.
+
+<Figure caption="원본 샤드와 복제본을 다른 노드에 교차 배치 → 노드 하나가 죽어도 데이터가 살아있다">
+  <svg viewBox="0 0 680 250" fontFamily="ui-monospace, monospace" role="img" aria-label="클러스터 안에 두 노드가 있고, 각 노드에 프라이머리 샤드와 다른 샤드의 레플리카가 분산 배치된 모습">
+    <rect x="20" y="20" width="640" height="210" rx="12" fill="none" stroke="#56c7d6" strokeWidth="1.4" />
+    <text x="40" y="46" fontSize="12.5" fill="#56c7d6" fontWeight="600">cluster</text>
+    <text x="560" y="46" fontSize="11" fill="var(--text-subtle)">index: 샤드 2개 + 레플리카 1세트</text>
+    <rect x="44" y="64" width="290" height="146" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="62" y="90" fontSize="11.5" fill="var(--text-muted)">node 1</text>
+    <rect x="62" y="104" width="120" height="44" rx="7" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="122" y="124" fontSize="11" fill="#56c7d6" textAnchor="middle" fontWeight="600">P0</text>
+    <text x="122" y="139" fontSize="9" fill="var(--text-subtle)" textAnchor="middle">primary</text>
+    <rect x="196" y="104" width="120" height="44" rx="7" fill="#e8a85c1f" stroke="#e8a85c" strokeOpacity=".5" />
+    <text x="256" y="124" fontSize="11" fill="#e8a85c" textAnchor="middle" fontWeight="600">R1</text>
+    <text x="256" y="139" fontSize="9" fill="var(--text-subtle)" textAnchor="middle">replica of P1</text>
+    <text x="62" y="178" fontFamily="sans-serif" fontSize="10.5" fill="var(--text-subtle)">샤드0 원본 + 샤드1 복제본</text>
+    <rect x="346" y="64" width="290" height="146" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="364" y="90" fontSize="11.5" fill="var(--text-muted)">node 2</text>
+    <rect x="364" y="104" width="120" height="44" rx="7" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="424" y="124" fontSize="11" fill="#56c7d6" textAnchor="middle" fontWeight="600">P1</text>
+    <text x="424" y="139" fontSize="9" fill="var(--text-subtle)" textAnchor="middle">primary</text>
+    <rect x="498" y="104" width="120" height="44" rx="7" fill="#e8a85c1f" stroke="#e8a85c" strokeOpacity=".5" />
+    <text x="558" y="124" fontSize="11" fill="#e8a85c" textAnchor="middle" fontWeight="600">R0</text>
+    <text x="558" y="139" fontSize="9" fill="var(--text-subtle)" textAnchor="middle">replica of P0</text>
+    <text x="364" y="178" fontFamily="sans-serif" fontSize="10.5" fill="var(--text-subtle)">샤드1 원본 + 샤드0 복제본</text>
+  </svg>
+</Figure>
+
+> **핵심** — 샤드 = 확장과 병렬 처리, 레플리카 = 가용성과 읽기 분산. 검색 요청이 오면 여러 샤드에서 동시에 찾고 결과를 합친다. 이게 대용량에서도 빠른 두 번째 이유다(첫 번째는 다음 섹션의 역인덱스).
+
+## 03 · 데이터 구조 — 인덱스 / 도큐먼트 / 필드
+
+Elasticsearch는 JSON 도큐먼트를 저장하고 검색한다. RDB와 1:1로 대응시키면 구조가 빨리 잡힌다.
+
+- **인덱스(Index)** — 같은 성격의 도큐먼트를 모은 단위. RDB의 테이블에 해당한다.
+- **도큐먼트(Document)** — 저장되는 데이터 한 건. RDB의 행(row), JSON 객체 하나다.
+- **필드(Field)** — 도큐먼트 안의 key-value. RDB의 컬럼에 해당한다.
+- **매핑(Mapping)** — 각 필드의 데이터 타입과 분석 방식을 정의한 스키마.
+
+<Figure caption="인덱스 ⊃ 도큐먼트 ⊃ 필드. RDB의 table / row / column과 1:1 대응">
+  <svg viewBox="0 0 680 290" fontFamily="ui-monospace, monospace" role="img" aria-label="인덱스 안에 도큐먼트, 도큐먼트 안에 필드가 들어있는 계층 구조">
+    <rect x="20" y="20" width="640" height="250" rx="12" fill="none" stroke="#56c7d6" strokeWidth="1.5" />
+    <text x="40" y="48" fontSize="13" fill="#56c7d6" fontWeight="600">index : products</text>
+    <text x="585" y="48" fontSize="11" fill="var(--text-subtle)">≈ table</text>
+    <rect x="44" y="64" width="592" height="92" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="62" y="88" fontSize="11.5" fill="var(--text-muted)">document #1 <tspan fill="var(--text-subtle)">≈ row</tspan></text>
+    <rect x="62" y="100" width="160" height="40" rx="6" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="74" y="117" fontSize="10.5" fill="#56c7d6">"name"</text>
+    <text x="74" y="132" fontFamily="sans-serif" fontSize="11" fill="var(--text)">갤럭시 버즈</text>
+    <rect x="234" y="100" width="160" height="40" rx="6" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="246" y="117" fontSize="10.5" fill="#56c7d6">"price"</text>
+    <text x="246" y="132" fontSize="11" fill="#e8a85c">189000</text>
+    <rect x="406" y="100" width="212" height="40" rx="6" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="418" y="117" fontSize="10.5" fill="#56c7d6">"tags"</text>
+    <text x="418" y="132" fontFamily="sans-serif" fontSize="11" fill="var(--text)">["이어폰","무선"]</text>
+    <text x="600" y="93" fontSize="10" fill="var(--text-subtle)">field ≈ column</text>
+    <rect x="44" y="166" width="592" height="46" rx="9" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="62" y="194" fontSize="11.5" fill="var(--text-subtle)">document #2 …</text>
+    <rect x="44" y="222" width="592" height="34" rx="9" fill="var(--bg-subtle)" stroke="var(--border)" />
+    <text x="62" y="244" fontSize="11" fill="var(--text-subtle)">document #N …</text>
+  </svg>
+</Figure>
+
+도큐먼트 CRUD는 전부 REST API다. Kibana Dev Tools에서 바로 실행한다.
+
+**`PUT products/_doc/1`**
+
+```json
+{
+  "name": "갤럭시 버즈",
+  "price": 189000,
+  "tags": ["이어폰", "무선"]
+}
+// GET    products/_doc/1    → 조회
+// POST   products/_update/1 → 수정
+// DELETE products/_doc/1    → 삭제
+```
+
+> **주의** — 매핑은 한 번 정의되면 기존 필드 타입을 변경할 수 없다. 타입을 바꾸려면 새 인덱스를 만들고 `_reindex`로 옮겨야 한다. 운영 인덱스는 처음 설계가 중요하다.
+
+## 04 · 역인덱스 — 검색이 빠른 진짜 이유
+
+RDB는 `WHERE content LIKE '%검색%'`에서 본문을 처음부터 끝까지 훑는다. Elasticsearch는 반대다. 저장 시점에 텍스트를 단어(term)로 쪼개, "이 단어가 어느 도큐먼트에 있는가"를 거꾸로 색인해 둔다. 이게 **역인덱스**(Inverted Index)다.
+
+<Figure caption="텍스트를 미리 단어로 쪼개 색인 → 검색 시점에는 단어로 도큐먼트를 바로 찾는다">
+  <svg viewBox="0 0 680 320" fontFamily="ui-monospace, monospace" role="img" aria-label="도큐먼트 텍스트를 단어 단위로 분해해 역인덱스로 만드는 과정">
+    <defs><marker id="esS4" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#e8a85c" /></marker></defs>
+    <text x="20" y="34" fontSize="11" fill="var(--text-subtle)">DOCUMENTS</text>
+    <rect x="20" y="46" width="230" height="42" rx="7" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="34" y="64" fontSize="10.5" fill="#56c7d6">doc 1</text>
+    <text x="34" y="80" fontFamily="sans-serif" fontSize="12" fill="var(--text)">맑은 가을 하늘</text>
+    <rect x="20" y="98" width="230" height="42" rx="7" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="34" y="116" fontSize="10.5" fill="#56c7d6">doc 2</text>
+    <text x="34" y="132" fontFamily="sans-serif" fontSize="12" fill="var(--text)">가을 단풍</text>
+    <rect x="20" y="150" width="230" height="42" rx="7" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="34" y="168" fontSize="10.5" fill="#56c7d6">doc 3</text>
+    <text x="34" y="184" fontFamily="sans-serif" fontSize="12" fill="var(--text)">맑은 호수</text>
+    <text x="300" y="118" fontSize="11" fill="#e8a85c" textAnchor="middle">분석</text>
+    <path d="M275 122 L325 122" stroke="#e8a85c" strokeWidth="1.5" markerEnd="url(#esS4)" />
+    <text x="350" y="34" fontSize="11" fill="var(--text-subtle)">INVERTED INDEX</text>
+    <rect x="350" y="46" width="310" height="200" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <line x1="470" y1="46" x2="470" y2="246" stroke="var(--border)" />
+    <text x="362" y="68" fontSize="10.5" fill="var(--text-muted)">term</text>
+    <text x="482" y="68" fontSize="10.5" fill="var(--text-muted)">posting list</text>
+    <line x1="350" y1="78" x2="660" y2="78" stroke="var(--border)" />
+    <text x="362" y="104" fontFamily="sans-serif" fontSize="13" fill="#e07a6b">맑은</text>
+    <text x="482" y="104" fontSize="12" fill="#56c7d6">[ 1, 3 ]</text>
+    <line x1="350" y1="118" x2="660" y2="118" stroke="var(--border)" />
+    <text x="362" y="144" fontFamily="sans-serif" fontSize="13" fill="#e07a6b">가을</text>
+    <text x="482" y="144" fontSize="12" fill="#56c7d6">[ 1, 2 ]</text>
+    <line x1="350" y1="158" x2="660" y2="158" stroke="var(--border)" />
+    <text x="362" y="184" fontFamily="sans-serif" fontSize="13" fill="var(--text)">하늘</text>
+    <text x="482" y="184" fontSize="12" fill="#56c7d6">[ 1 ]</text>
+    <line x1="350" y1="198" x2="660" y2="198" stroke="var(--border)" />
+    <text x="362" y="224" fontFamily="sans-serif" fontSize="13" fill="var(--text)">단풍</text>
+    <text x="482" y="224" fontSize="12" fill="#56c7d6">[ 2 ]</text>
+    <text x="350" y="278" fontSize="11" fill="var(--text-subtle)">"가을" 검색 → posting list에서 즉시 [1, 2] 반환 (풀스캔 없음)</text>
+  </svg>
+</Figure>
+
+- **RDB** — 검색마다 본문 스캔. 데이터 양에 비례해 느려진다.
+- **Elasticsearch** — 색인 때 미리 단어 분해. 검색은 단어 → 도큐먼트 lookup이라 빠르다.
+- **트레이드오프** — 색인 시점에 분석 비용·저장 공간이 든다. "쓰기를 미리 치르고 읽기를 싸게 만든다".
+
+### 단어 순서가 바뀌어도 검색된다
+
+역인덱스는 단어별로 색인하므로 어순을 따지지 않는다. "맑은 가을"로 검색하든 "가을 맑은"으로 검색하든, 두 단어가 든 도큐먼트를 똑같이 찾아낸다. RDB의 `LIKE`로는 불가능한 동작이다.
+
+### 연관도 점수 (_score)
+
+match 검색 결과는 그냥 일치/불일치가 아니라 **얼마나 잘 맞는지**를 점수(`_score`)로 매겨 정렬한다. 기본 알고리즘은 BM25다.
+
+- **TF** — 해당 단어가 도큐먼트에 많이 나올수록 점수↑.
+- **IDF** — 그 단어가 전체 도큐먼트에서 희귀할수록 점수↑ (흔한 단어는 변별력이 낮으므로).
+- **결과** — "검색어와 가장 관련 높은 순"으로 정렬돼 나온다. 이 점수를 의도적으로 조정하는 게 뒤의 `should`·boost다.
+
+## 05 · 애널라이저 — 텍스트가 토큰이 되는 과정
+
+애널라이저(Analyzer)는 원본 텍스트를 역인덱스에 들어갈 토큰으로 가공하는 파이프라인이다. 세 단계를 순서대로 거친다.
+
+<Figure caption="Character Filter → Tokenizer → Token Filter 순서로 동작. 토크나이저는 반드시 1개">
+  <svg viewBox="0 0 680 220" fontFamily="ui-monospace, monospace" role="img" aria-label="애널라이저 파이프라인: 캐릭터 필터, 토크나이저, 토큰 필터">
+    <defs><marker id="esS5" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#56c7d6" /></marker></defs>
+    <rect x="14" y="80" width="120" height="60" rx="8" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="74" y="105" fontSize="10" fill="var(--text-subtle)" textAnchor="middle">input</text>
+    <text x="74" y="124" fontSize="11" fill="var(--text)" textAnchor="middle">&lt;b&gt;The Cats&lt;/b&gt;</text>
+    <path d="M138 110 L162 110" stroke="#56c7d6" strokeWidth="1.5" markerEnd="url(#esS5)" />
+    <rect x="166" y="74" width="118" height="72" rx="8" fill="var(--bg-muted)" stroke="#56c7d6" strokeWidth="1.3" />
+    <text x="225" y="96" fontFamily="sans-serif" fontSize="11.5" fill="#56c7d6" textAnchor="middle" fontWeight="600">① Character</text>
+    <text x="225" y="111" fontFamily="sans-serif" fontSize="11.5" fill="#56c7d6" textAnchor="middle" fontWeight="600">Filter</text>
+    <text x="225" y="132" fontSize="9.5" fill="var(--text-muted)" textAnchor="middle">html_strip</text>
+    <path d="M288 110 L312 110" stroke="#56c7d6" strokeWidth="1.5" markerEnd="url(#esS5)" />
+    <rect x="316" y="74" width="118" height="72" rx="8" fill="var(--bg-muted)" stroke="#e8a85c" strokeWidth="1.3" />
+    <text x="375" y="96" fontFamily="sans-serif" fontSize="11.5" fill="#e8a85c" textAnchor="middle" fontWeight="600">② Tokenizer</text>
+    <text x="375" y="116" fontSize="9.5" fill="var(--text-muted)" textAnchor="middle">공백·기준으로</text>
+    <text x="375" y="130" fontSize="9.5" fill="var(--text-muted)" textAnchor="middle">단어 분리</text>
+    <path d="M438 110 L462 110" stroke="#56c7d6" strokeWidth="1.5" markerEnd="url(#esS5)" />
+    <rect x="466" y="74" width="118" height="72" rx="8" fill="var(--bg-muted)" stroke="#e07a6b" strokeWidth="1.3" />
+    <text x="525" y="96" fontFamily="sans-serif" fontSize="11.5" fill="#e07a6b" textAnchor="middle" fontWeight="600">③ Token</text>
+    <text x="525" y="111" fontFamily="sans-serif" fontSize="11.5" fill="#e07a6b" textAnchor="middle" fontWeight="600">Filter</text>
+    <text x="525" y="132" fontSize="9.5" fill="var(--text-muted)" textAnchor="middle">lowercase, stop…</text>
+    <path d="M588 110 L612 110" stroke="#56c7d6" strokeWidth="1.5" markerEnd="url(#esS5)" />
+    <rect x="616" y="88" width="56" height="44" rx="8" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="644" y="104" fontSize="9" fill="#56c7d6" textAnchor="middle">cat</text>
+    <text x="644" y="120" fontSize="9" fill="var(--text-subtle)" textAnchor="middle">(the 제거)</text>
+  </svg>
+</Figure>
+
+- **Character Filter** — 토큰화 전에 원문을 손본다. `html_strip`으로 `<b>` 태그 제거.
+- **Tokenizer** — 텍스트를 토큰으로 자르는 핵심 단계. 정확히 하나만 지정.
+- **Token Filter** — 잘린 토큰을 후처리. 여러 개를 순서대로 적용.
+
+### 기본 제공 애널라이저
+
+| 애널라이저 | 동작 |
+| --- | --- |
+| standard | 기본값. 공백·문장부호로 자르고 소문자화. 대부분의 영문에 무난 |
+| simple | 문자가 아닌 것 모두 기준으로 자르고 소문자화 (숫자도 분리) |
+| whitespace | 공백으로만 자른다. 소문자화·기호 제거 안 함 |
+| stop | standard + 불용어(a, the, or…) 제거 |
+| keyword | 자르지 않고 통째로 하나의 토큰. 분석 없이 원문 그대로 |
+
+### 자주 쓰는 토큰 필터
+
+| 필터 | 역할 | 예시 |
+| --- | --- | --- |
+| lowercase | 대소문자 통일. "Apple"과 "apple"이 같은 검색어로 | `Apple → apple` |
+| stop | 불용어 제거. 색인 크기↓, 노이즈↓ | `a, an, the 제거` |
+| stemmer | 어형을 어간으로 환원. 시제·복수형 흡수 | `running → run` |
+| synonym | 동의어를 같은 토큰으로 묶음 | `laptop ↔ notebook` |
+
+> **중요** — 색인 때 쓴 애널라이저와 검색 때 쓰는 애널라이저가 같아야 결과가 맞는다. 둘 다 `lowercase`를 거쳐야 "Apple" 검색이 "apple" 색인어와 매칭된다.
+
+토큰이 실제로 어떻게 쪼개지는지는 `_analyze` API로 확인한다. 매핑 잡기 전에 반드시 찍어보는 습관이 좋다.
+
+**`POST _analyze`**
+
+```json
+{
+  "analyzer": "standard",
+  "text": "The Quick Brown Foxes"
+}
+// → [the, quick, brown, foxes]  (소문자화 + 공백 분리)
+```
+
+## 06 · 한글 검색 — Nori Analyzer
+
+standard 애널라이저는 공백 기준으로만 자른다. 영어는 단어가 공백으로 나뉘니 잘 되지만, **한글은 조사가 단어에 붙어 다녀서** 제대로 검색되지 않는다. "가을이"를 통째로 색인하면 "가을"로 검색해도 안 잡힌다.
+
+<Figure caption="Nori는 형태소 분석기. 조사·어미를 분리해 한글이 의도대로 검색되게 한다">
+  <svg viewBox="0 0 680 230" fontFamily="ui-monospace, monospace" role="img" aria-label="standard 애널라이저와 nori 애널라이저의 한글 분석 결과 비교">
+    <text x="20" y="34" fontFamily="sans-serif" fontSize="13" fill="var(--text)">원문 <tspan fontFamily="ui-monospace, monospace" fontSize="12" fill="var(--text-muted)">"가을이 깊었다"</tspan></text>
+    <rect x="20" y="56" width="300" height="140" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="36" y="80" fontSize="11" fill="var(--text-subtle)">standard analyzer</text>
+    <rect x="36" y="96" width="120" height="34" rx="6" fill="#e07a6b1f" stroke="#e07a6b" strokeOpacity=".5" />
+    <text x="96" y="118" fontFamily="sans-serif" fontSize="12" fill="#e07a6b" textAnchor="middle">가을이</text>
+    <rect x="168" y="96" width="120" height="34" rx="6" fill="#e07a6b1f" stroke="#e07a6b" strokeOpacity=".5" />
+    <text x="228" y="118" fontFamily="sans-serif" fontSize="12" fill="#e07a6b" textAnchor="middle">깊었다</text>
+    <text x="36" y="160" fontFamily="sans-serif" fontSize="11.5" fill="var(--text-muted)">"가을" 검색 →</text>
+    <text x="158" y="160" fontFamily="sans-serif" fontSize="11.5" fill="#e07a6b" fontWeight="600">매칭 실패 ✕</text>
+    <text x="36" y="180" fontSize="10" fill="var(--text-subtle)">조사가 붙은 채로 색인됨</text>
+    <rect x="360" y="56" width="300" height="140" rx="9" fill="var(--bg-muted)" stroke="#56c7d6" strokeWidth="1.3" />
+    <text x="376" y="80" fontSize="11" fill="#56c7d6">nori analyzer</text>
+    <rect x="376" y="96" width="74" height="34" rx="6" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="413" y="118" fontFamily="sans-serif" fontSize="12" fill="#56c7d6" textAnchor="middle">가을</text>
+    <rect x="460" y="96" width="74" height="34" rx="6" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="497" y="118" fontFamily="sans-serif" fontSize="12" fill="#56c7d6" textAnchor="middle">깊</text>
+    <rect x="544" y="96" width="100" height="34" rx="6" fill="var(--bg-subtle)" stroke="var(--border)" strokeDasharray="4 3" />
+    <text x="594" y="112" fontFamily="sans-serif" fontSize="10.5" fill="var(--text-subtle)" textAnchor="middle">이 · 었다</text>
+    <text x="594" y="126" fontSize="8" fill="var(--text-subtle)" textAnchor="middle">조사·어미 제거</text>
+    <text x="376" y="160" fontFamily="sans-serif" fontSize="11.5" fill="var(--text-muted)">"가을" 검색 →</text>
+    <text x="498" y="160" fontFamily="sans-serif" fontSize="11.5" fill="#56c7d6" fontWeight="600">매칭 성공 ✓</text>
+    <text x="376" y="180" fontSize="10" fill="var(--text-subtle)">형태소 단위로 분해</text>
+  </svg>
+</Figure>
+
+- **Nori** — Elasticsearch 공식 한글 형태소 분석 플러그인. 명사·동사 어간을 뽑고 조사·어미를 분리.
+- **설치** — `analysis-nori` 플러그인을 별도 설치. (Elastic Cloud·AWS OpenSearch는 기본 제공)
+- **한·영 혼용** — 한 필드에 한글·영어가 섞이면, 멀티 필드나 적절한 애널라이저 조합으로 양쪽 다 검색되게 설계.
+
+## 07 · 매핑 — 데이터 타입과 text / keyword
+
+매핑은 필드별 데이터 타입을 정의한다. 타입에 따라 분석 여부·검색 방식·정렬 가능 여부가 갈린다.
+
+### 주요 데이터 타입
+
+| 타입 | 용도 |
+| --- | --- |
+| text | 전문 검색용 문자열. 애널라이저로 분석됨 (본문·상품명) |
+| keyword | 정확 일치·정렬·집계용 문자열. 분석 안 함 (상태·카테고리·이메일) |
+| long / integer | 정수 |
+| double / float | 실수 |
+| date | 날짜·시간. range 쿼리·정렬에 사용 |
+| boolean | true / false |
+| object | 중첩 JSON 객체 (내부적으로 평탄화) |
+| nested | 배열 안 객체를 독립적으로 검색해야 할 때 |
+
+### text와 keyword는 다르다
+
+가장 자주 하는 실수가 이 둘의 혼동이다. 같은 문자열도 타입에 따라 토큰이 완전히 달라진다.
+
+<Figure caption="같은 문자열도 타입에 따라 토큰이 달라진다. 용도에 맞게 골라야 한다">
+  <svg viewBox="0 0 680 210" fontFamily="ui-monospace, monospace" role="img" aria-label="동일한 문자열을 text 타입과 keyword 타입으로 색인했을 때의 차이">
+    <text x="20" y="32" fontFamily="sans-serif" fontSize="13" fill="var(--text)">색인할 값 <tspan fontFamily="ui-monospace, monospace" fontSize="12" fill="#e8a85c">"Samsung Galaxy Buds"</tspan></text>
+    <rect x="20" y="50" width="310" height="138" rx="9" fill="var(--bg-muted)" stroke="#56c7d6" strokeWidth="1.3" />
+    <text x="36" y="74" fontSize="12" fill="#56c7d6" fontWeight="600">text</text>
+    <text x="36" y="92" fontFamily="sans-serif" fontSize="11" fill="var(--text-muted)">애널라이저 거침 → 분석되어 토큰화</text>
+    <rect x="36" y="104" width="78" height="30" rx="5" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="75" y="124" fontSize="11" fill="#56c7d6" textAnchor="middle">samsung</text>
+    <rect x="122" y="104" width="62" height="30" rx="5" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="153" y="124" fontSize="11" fill="#56c7d6" textAnchor="middle">galaxy</text>
+    <rect x="192" y="104" width="54" height="30" rx="5" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="219" y="124" fontSize="11" fill="#56c7d6" textAnchor="middle">buds</text>
+    <text x="36" y="160" fontFamily="sans-serif" fontSize="11.5" fill="var(--text)">✓ 전문 검색 (일부 단어로 매칭)</text>
+    <text x="36" y="178" fontFamily="sans-serif" fontSize="11.5" fill="var(--text-subtle)">✕ 정렬·집계 부적합</text>
+    <rect x="350" y="50" width="310" height="138" rx="9" fill="var(--bg-muted)" stroke="#e8a85c" strokeWidth="1.3" />
+    <text x="366" y="74" fontSize="12" fill="#e8a85c" fontWeight="600">keyword</text>
+    <text x="366" y="92" fontFamily="sans-serif" fontSize="11" fill="var(--text-muted)">분석 안 함 → 통째로 하나의 토큰</text>
+    <rect x="366" y="104" width="252" height="30" rx="5" fill="#e8a85c1f" stroke="#e8a85c" strokeOpacity=".5" />
+    <text x="492" y="124" fontSize="11" fill="#e8a85c" textAnchor="middle">Samsung Galaxy Buds</text>
+    <text x="366" y="160" fontFamily="sans-serif" fontSize="11.5" fill="var(--text)">✓ 정확히 일치·정렬·집계·필터</text>
+    <text x="366" y="178" fontFamily="sans-serif" fontSize="11.5" fill="var(--text-subtle)">✕ 부분 단어 검색 안 됨</text>
+  </svg>
+</Figure>
+
+- **text** — 분석한다. 일부 단어로 찾는 전문 검색용.
+- **keyword** — 분석 안 한다. 정확 일치·정렬·집계·필터용.
+- **Multi Field** — 한 필드에 두 타입 동시. `name`은 text로 검색, `name.keyword`로 정렬·집계.
+- **매핑 특징** — `null` 허용, 별도 array 타입 없이 모든 필드가 배열을 받는다.
+
+**`PUT products/_mapping` — multi field**
+
+```json
+{
+  "properties": {
+    "name": {
+      "type": "text",
+      "analyzer": "nori",
+      "fields": {
+        "keyword": { "type": "keyword" }  // name.keyword
+      }
+    }
+  }
+}
+```
+
+## 08 · 쿼리 DSL — 자주 쓰는 검색들
+
+실무 검색의 90%는 아래 조합으로 끝난다. 먼저 "분석 여부"로 두 갈래를 나누는 게 출발점이다.
+
+- **match** — 검색어를 **애널라이저로 분석**한 뒤 매칭. 전문 검색 기본. text 필드용.
+- **term / terms** — 검색어를 **분석 없이 정확히 일치**. keyword·숫자·상태값용.
+
+> **흔한 함정** — text 필드에 `term`으로 "Samsung Galaxy"를 넣으면 결과가 안 나온다. text는 소문자 토큰(`samsung`, `galaxy`)으로 색인됐는데 term은 원문 그대로 비교하기 때문. text엔 match, keyword엔 term이 기본 원칙.
+
+### bool — 조건 조합의 핵심
+
+<Figure caption="점수가 필요 없는 조건은 filter로 빼면 캐싱되어 더 빠르다">
+  <svg viewBox="0 0 680 250" fontFamily="ui-monospace, monospace" role="img" aria-label="bool 쿼리의 must, should, filter, must_not 네 절의 차이">
+    <rect x="20" y="20" width="640" height="210" rx="11" fill="none" stroke="var(--border)" />
+    <text x="40" y="46" fontSize="12" fill="var(--text-muted)">bool</text>
+    <rect x="40" y="60" width="290" height="72" rx="8" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="56" y="84" fontSize="12" fill="#56c7d6" fontWeight="600">must</text>
+    <text x="56" y="104" fontFamily="sans-serif" fontSize="11.5" fill="var(--text)">반드시 만족 (AND)</text>
+    <text x="56" y="122" fontFamily="sans-serif" fontSize="11" fill="var(--text-subtle)">점수에 반영 → 연관도 영향 O</text>
+    <rect x="350" y="60" width="290" height="72" rx="8" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="366" y="84" fontSize="12" fill="#e8a85c" fontWeight="600">should</text>
+    <text x="366" y="104" fontFamily="sans-serif" fontSize="11.5" fill="var(--text)">만족하면 가산점 (OR)</text>
+    <text x="366" y="122" fontFamily="sans-serif" fontSize="11" fill="var(--text-subtle)">점수 ↑ → 상위 노출 유도</text>
+    <rect x="40" y="144" width="290" height="72" rx="8" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="56" y="168" fontSize="12" fill="#56c7d6" fontWeight="600">filter</text>
+    <text x="56" y="188" fontFamily="sans-serif" fontSize="11.5" fill="var(--text)">반드시 만족하되 점수 계산 X</text>
+    <text x="56" y="206" fontFamily="sans-serif" fontSize="11" fill="var(--text-subtle)">캐싱됨 → 빠름. 범위·상태 필터에</text>
+    <rect x="350" y="144" width="290" height="72" rx="8" fill="#e07a6b1f" stroke="#e07a6b" strokeOpacity=".5" />
+    <text x="366" y="168" fontSize="12" fill="#e07a6b" fontWeight="600">must_not</text>
+    <text x="366" y="188" fontFamily="sans-serif" fontSize="11.5" fill="var(--text)">만족하는 도큐먼트 제외</text>
+    <text x="366" y="206" fontFamily="sans-serif" fontSize="11" fill="var(--text-subtle)">점수 계산 X</text>
+  </svg>
+</Figure>
+
+**`GET products/_search` — bool 조합**
+
+```json
+{ "query": { "bool": {
+  "must":    [{ "match": { "name": "무선 이어폰" } }],
+  "filter":  [{ "range": { "price": { "lte": 200000 } } }],
+  "must_not":[{ "term":  { "status": "품절" } }],
+  "should":  [{ "term":  { "brand": "삼성" } }]
+} } }
+// 무선 이어폰 + 20만원 이하 + 품절 제외 + 삼성이면 상위로
+```
+
+### 나머지 자주 쓰는 쿼리
+
+| 쿼리 | 쓰는 상황 |
+| --- | --- |
+| range | 숫자·날짜 범위. `gte / lte / gt / lt`로 가격·기간 필터링 |
+| fuzziness | 오타 허용. 편집 거리 기준으로 "samsng"도 "samsung"으로 매칭 |
+| multi_match | 여러 필드를 한 번에. 제목·본문에서 동시에 키워드 검색 |
+
+### 특정 조건을 상위로 — 점수 튜닝
+
+"평점 높고 좋아요 많은 글을 위로" 같은 요구는 점수를 직접 조정해 푼다.
+
+- **should + boost** — 특정 조건에 가중치를 줘서 매칭되면 `_score`를 올린다. 인기 브랜드·카테고리를 띄울 때.
+- **function_score** — 평점·좋아요 같은 숫자 필드를 점수에 곱한다. "관련도 × 인기도"로 정렬할 때.
+
+## 09 · 실무 부가 기능 — 하이라이팅 · 정렬 · 자동완성
+
+- **highlight** — 매칭된 부분을 `<em>` 태그로 감싸 반환. 결과에서 키워드 강조 표시.
+- **pagination** — `from` / `size`로 페이지 분할. 깊은 페이지는 `search_after`가 안전.
+- **sorting** — `sort`로 정렬. text는 정렬 불가 → `.keyword`나 숫자 필드 기준.
+- **자동완성** — 일부만 입력해도 추천. `edge_ngram`으로 접두어를 미리 색인하거나 `search_as_you_type` 타입 사용.
+
+### 자동완성 — edge_ngram의 원리
+
+입력 도중에도 결과가 나오게 하려면, 단어를 앞에서부터 잘라 여러 접두어로 미리 색인한다. "갤럭시"를 색인하면 `갤`, `갤럭`, `갤럭시`가 토큰으로 들어가, "갤"만 쳐도 매칭된다.
+
+<Figure caption="단어를 접두어 단위로 미리 쪼개 색인 → 입력 도중에도 즉시 추천">
+  <svg viewBox="0 0 680 130" fontFamily="ui-monospace, monospace" role="img" aria-label="edge_ngram으로 단어를 접두어 토큰들로 분해하는 모습">
+    <defs><marker id="esS9" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#56c7d6" /></marker></defs>
+    <text x="20" y="40" fontFamily="sans-serif" fontSize="13" fill="var(--text)">색인어 <tspan fontFamily="ui-monospace, monospace" fontSize="12" fill="var(--text-muted)">"갤럭시"</tspan></text>
+    <path d="M120 35 L150 35" stroke="#56c7d6" strokeWidth="1.4" markerEnd="url(#esS9)" />
+    <rect x="160" y="18" width="80" height="34" rx="6" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="200" y="40" fontFamily="sans-serif" fontSize="12" fill="#56c7d6" textAnchor="middle">갤</text>
+    <rect x="252" y="18" width="90" height="34" rx="6" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="297" y="40" fontFamily="sans-serif" fontSize="12" fill="#56c7d6" textAnchor="middle">갤럭</text>
+    <rect x="354" y="18" width="100" height="34" rx="6" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="404" y="40" fontFamily="sans-serif" fontSize="12" fill="#56c7d6" textAnchor="middle">갤럭시</text>
+    <text x="20" y="95" fontFamily="sans-serif" fontSize="12.5" fill="var(--text)">사용자 입력 <tspan fontFamily="ui-monospace, monospace" fill="#e8a85c">"갤"</tspan> → 접두어 토큰 <tspan fontFamily="ui-monospace, monospace" fill="#56c7d6">갤</tspan> 에 매칭 → "갤럭시" 추천</text>
+  </svg>
+</Figure>
+
+## 10 · 프로젝트 — 상품 검색 기능 구현 흐름
+
+지금까지의 개념을 쿠팡 같은 상품 검색에 합치면 이렇게 된다. 핵심은 **기능 하나하나가 앞서 본 쿼리·매핑의 조립**이라는 점이다.
+
+### 구현 순서
+
+- **① 요구사항** — 상품명 검색 + 필터(가격·카테고리) + 자동완성 + 결과 하이라이팅·정렬.
+- **② 인프라 설계** — 원본은 MySQL, 검색은 Elasticsearch, 그 사이를 Spring Boot가 연결.
+- **③ 매핑 정의** — 상품명은 nori text + keyword 멀티필드, 가격은 long, 카테고리·상태는 keyword, 자동완성용 필드는 edge_ngram.
+- **④ 분석 검증** — 색인 전에 `_analyze`로 한글이 의도대로 쪼개지는지 확인.
+- **⑤ 검색 쿼리 조립** — 아래처럼 한 요청에 기능을 합친다.
+
+**`GET products/_search` — 상품 검색 종합**
+
+```json
+{
+  "query": { "bool": {
+    "must":   [{ "multi_match": {
+                 "query": "무선 이어폰",
+                 "fields": ["name", "desc"] } }],
+    "filter": [{ "term":  { "category": "음향기기" } },
+               { "range": { "price": { "lte": 300000 } } }],
+    "must_not":[{ "term":  { "status": "품절" } }]
+  } },
+  "highlight": { "fields": { "name": {} } },
+  "sort": [{ "_score": "desc" }, { "price": "asc" }],
+  "from": 0, "size": 20
+}
+```
+
+### 적용 전략
+
+- **점수 vs 필터** — 검색어 관련도는 `must`(점수 O), 가격·카테고리 같은 단순 조건은 `filter`(점수 X, 캐싱)로 분리.
+- **정렬 우선순위** — 1차 `_score`, 동점이면 가격순. 인기도까지 넣으려면 function_score.
+- **자동완성은 별도 인덱스/필드** — 검색 본 쿼리와 분리해 edge_ngram 필드로 가볍게 처리.
+
+## 11 · 운영 — Spring Boot 연동과 Elastic Cloud
+
+Spring Data Elasticsearch를 쓰면 인덱스를 도큐먼트 클래스로 매핑하고 리포지토리로 CRUD를 한다. JPA를 써봤다면 구조가 익숙하다.
+
+**`Product.java`**
+
+```java
+@Document(indexName = "products")
+public class Product {
+    @Id private String id;
+
+    @Field(type = FieldType.Text, analyzer = "nori")
+    private String name;
+
+    @Field(type = FieldType.Long)
+    private Long price;
+}
+```
+
+### 데이터 동기화 — 가장 중요한 부분
+
+Elasticsearch는 원본 저장소가 아니라 **읽기 전용 검색 인덱스**로 두는 게 정석이다. 원본은 MySQL에 두고, 데이터가 바뀔 때 ES에도 반영한다.
+
+<Figure caption="쓰기는 MySQL, 검색은 Elasticsearch. 둘 사이 동기화가 설계의 핵심">
+  <svg viewBox="0 0 680 150" fontFamily="ui-monospace, monospace" role="img" aria-label="MySQL을 원본으로 두고 Elasticsearch에 동기화하는 아키텍처">
+    <defs>
+      <marker id="esS11a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#56c7d6" /></marker>
+      <marker id="esS11b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#e8a85c" /></marker>
+    </defs>
+    <rect x="30" y="50" width="150" height="56" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="105" y="76" fontFamily="sans-serif" fontSize="13" fill="var(--text)" textAnchor="middle" fontWeight="600">MySQL</text>
+    <text x="105" y="94" fontSize="10" fill="var(--text-subtle)" textAnchor="middle">원본 (write)</text>
+    <path d="M184 78 L290 78" stroke="#56c7d6" strokeWidth="1.5" markerEnd="url(#esS11a)" />
+    <text x="237" y="68" fontSize="10.5" fill="#56c7d6" textAnchor="middle">동기화</text>
+    <text x="237" y="98" fontSize="9.5" fill="var(--text-subtle)" textAnchor="middle">insert / update / delete 반영</text>
+    <rect x="294" y="50" width="150" height="56" rx="9" fill="#56c7d61f" stroke="#56c7d6" strokeOpacity=".5" />
+    <text x="369" y="76" fontFamily="sans-serif" fontSize="13" fill="#56c7d6" textAnchor="middle" fontWeight="600">Elasticsearch</text>
+    <text x="369" y="94" fontSize="10" fill="var(--text-subtle)" textAnchor="middle">검색 인덱스 (read)</text>
+    <path d="M448 78 L554 78" stroke="#e8a85c" strokeWidth="1.5" markerEnd="url(#esS11b)" />
+    <text x="501" y="68" fontSize="10.5" fill="#e8a85c" textAnchor="middle">검색 요청</text>
+    <rect x="558" y="50" width="100" height="56" rx="9" fill="var(--bg-muted)" stroke="var(--border)" />
+    <text x="608" y="76" fontFamily="sans-serif" fontSize="12" fill="var(--text)" textAnchor="middle" fontWeight="600">Spring</text>
+    <text x="608" y="94" fontSize="9.5" fill="var(--text-subtle)" textAnchor="middle">Search API</text>
+  </svg>
+</Figure>
+
+### 직접 구축 vs 매니지드
+
+- **Elastic Cloud** — Elastic 본사 매니지드 서비스. 최신 기능·Nori 플러그인을 바로 사용.
+- **AWS OpenSearch** — Elasticsearch에서 갈라진 AWS 포크. AWS 생태계 통합에 유리, Nori도 제공.
+- **현업** — 직접 클러스터를 운영하기보다 매니지드를 쓰는 경우가 많다. 노드 관리·스케일링 부담을 줄이려고.
+
+> **비용 주의** — Elastic Cloud는 클러스터가 떠 있는 동안 과금된다. 실습·테스트 후에는 디플로이먼트를 반드시 삭제(리소스 정리)해야 불필요한 요금이 안 나간다.
+
+---
+
+> — 검색은 결국 "어떻게 쪼개서 색인하느냐"의 문제다.
+
+클러스터가 데이터를 분산하고, 역인덱스가 단어로 찾고, 애널라이저가 쪼개는 규칙을 정한다. text/keyword 구분과 분석기 선택부터 정확히 잡으면 나머지 쿼리는 조립일 뿐이다.
