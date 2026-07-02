@@ -339,7 +339,22 @@ html_strip은 태그 제거, mapping은 지정 문자 치환(`& → and`), patte
 | nori_tokenizer | 한글 형태소 단위 (Nori 플러그인) |
 | edge_ngram / ngram | 접두어·글자 조각으로 잘게 쪼갬 (자동완성용) |
 
-### 자주 쓰는 토큰 필터
+같은 입력을 토크나이저별로 어떻게 자르는지. (왼쪽 입력 → 오른쪽 토큰)
+
+<TokenDemo>
+  <TokenRow first name="standard"><Chip k="raw">Fast-Cars 2024</Chip> → <Chip k="out">Fast</Chip> <Chip k="out">Cars</Chip> <Chip k="out">2024</Chip></TokenRow>
+  <TokenRow name="whitespace"><Chip k="raw">Fast-Cars 2024</Chip> → <Chip k="out">Fast-Cars</Chip> <Chip k="out">2024</Chip></TokenRow>
+  <TokenRow name="lowercase"><Chip k="raw">Fast-Cars 2024</Chip> → <Chip k="out">fast</Chip> <Chip k="out">cars</Chip> · <Chip k="drop">2024</Chip></TokenRow>
+  <TokenRow name="keyword"><Chip k="raw">Fast-Cars 2024</Chip> → <Chip k="whole">Fast-Cars 2024</Chip></TokenRow>
+  <TokenRow name="nori_tokenizer"><Chip k="raw">맑은 하늘</Chip> → <Chip k="out">맑</Chip> <Chip k="out">은</Chip> <Chip k="out">하늘</Chip></TokenRow>
+  <TokenRow name="edge_ngram"><Chip k="raw">카페</Chip> → <Chip k="out">카</Chip> <Chip k="out">카페</Chip></TokenRow>
+</TokenDemo>
+
+토크나이저는 **자르기만 할 뿐 소문자화하지 않는다**(대소문자 통일은 `lowercase` 토큰 필터의 몫이다). standard는 하이픈·공백으로 자르고, whitespace는 공백에서만, lowercase는 문자 아닌 것 모두(숫자 `2024`는 버림)로 자르며 이 토크나이저만 예외적으로 소문자화까지 한다. keyword는 통째로 1토큰. *(점선 = 버려진 토큰)*
+
+### 토큰 필터 — 자른 토큰을 다듬기
+
+토큰화가 끝난 뒤 적용된다. 대소문자·어형·동의어 차이를 흡수해 "같은 뜻은 같은 토큰"으로 맞추는 단계다.
 
 | 필터 | 역할 | 언제 쓰나 |
 | --- | --- | --- |
@@ -408,19 +423,38 @@ standard는 숫자(`3`)를 남기지만 simple·stop은 버린다. whitespace만
 
 흐름은 **인덱스 생성(매핑에 애널라이저 지정) → 색인(자동 분석) → 검색(같은 분석 후 대조)**. `standard`·`nori` 같은 기본 제공 애널라이저는 매핑에 이름만 쓰면 되고, 필터를 직접 조합한 **커스텀 애널라이저는 `settings.analysis`에서 만들어 이름을 붙인 뒤** 매핑에서 참조한다.
 
-**`PUT products` — 커스텀 애널라이저 정의 후 필드에 지정**
+**`PUT products` — 부품별 정의 → 애널라이저로 묶기 → 필드에 적용**
 
 ```json
 {
-  "settings": { "analysis": { "analyzer": {
-    "my_nori": { "type": "custom", "tokenizer": "nori_tokenizer",
-                "filter": ["lowercase", "nori_part_of_speech"] }
-  } } },
-  "mappings": { "properties": {
-    "name": { "type": "text", "analyzer": "my_nori" }
+  "settings": { "analysis": {
+
+    "char_filter": {                     // ① 캐릭터 필터 정의
+      "amp_to_and": { "type": "mapping", "mappings": ["& => and"] }
+    },
+    "tokenizer": {                       // ② 토크나이저 정의
+      "my_edge": { "type": "edge_ngram", "min_gram": 1, "max_gram": 10 }
+    },
+    "filter": {                          // ③ 토큰 필터 정의
+      "my_syn": { "type": "synonym", "synonyms": ["노트북, 랩탑"] }
+    },
+    "analyzer": {                        // ④ 위 부품을 묶어 애널라이저 정의
+      "my_analyzer": {
+        "type":        "custom",
+        "char_filter": ["html_strip", "amp_to_and"],  // 내장 + 커스텀 혼용
+        "tokenizer":   "my_edge",
+        "filter":      ["lowercase", "my_syn"]
+      }
+    }
+  } },
+
+  "mappings": { "properties": {         // ⑤ 필드에 애널라이저 적용
+    "name": { "type": "text", "analyzer": "my_analyzer" }
   } }
 }
 ```
+
+`html_strip`·`lowercase`처럼 **내장 부품은 이름만 쓰면** 되고, 설정이 필요한 **커스텀 부품(`amp_to_and`·`my_edge`·`my_syn`)은 `settings.analysis`에서 먼저 정의**한 뒤 애널라이저의 `char_filter`·`tokenizer`·`filter`에서 이름으로 참조한다. 애널라이저 자체는 `mappings`에서 필드에 붙인다. (위 조합은 각 부품의 위치를 보여주기 위한 예시다)
 
 토큰이 실제로 어떻게 쪼개지는지는 `_analyze` API로 확인한다. 매핑 잡기 전에 반드시 찍어보는 습관이 좋다.
 
