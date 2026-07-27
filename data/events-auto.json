@@ -63,15 +63,6 @@
     "description": "Redis 8.8.0 정식 출시."
   },
   {
-    "slug": "anthropic-sdk-v0-105-0-release",
-    "title": "Anthropic SDK v0.105.0 릴리즈",
-    "date": "2026-05-28",
-    "category": "AI",
-    "type": "ai-release",
-    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.105.0",
-    "description": "Anthropic SDK v0.105.0 정식 출시."
-  },
-  {
     "slug": "openai-sdk-v2-40-0-release",
     "title": "OpenAI SDK v2.40.0 릴리즈",
     "date": "2026-06-01",
@@ -268,6 +259,51 @@
     "type": "ai-release",
     "link": "https://github.com/openai/openai-python/releases/tag/v2.46.0",
     "description": "OpenAI SDK v2.46.0 정식 출시."
+  },
+  {
+    "slug": "anthropic-sdk-v0-118-0-release",
+    "title": "Anthropic SDK v0.118.0 릴리즈",
+    "date": "2026-07-22",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.118.0",
+    "description": "Anthropic SDK v0.118.0 정식 출시."
+  },
+  {
+    "slug": "openai-sdk-v2-47-0-release",
+    "title": "OpenAI SDK v2.47.0 릴리즈",
+    "date": "2026-07-22",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/openai/openai-python/releases/tag/v2.47.0",
+    "description": "OpenAI SDK v2.47.0 정식 출시."
+  },
+  {
+    "slug": "anthropic-sdk-v0-119-0-release",
+    "title": "Anthropic SDK v0.119.0 릴리즈",
+    "date": "2026-07-23",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.119.0",
+    "description": "Anthropic SDK v0.119.0 정식 출시."
+  },
+  {
+    "slug": "openai-sdk-v2-48-0-release",
+    "title": "OpenAI SDK v2.48.0 릴리즈",
+    "date": "2026-07-23",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/openai/openai-python/releases/tag/v2.48.0",
+    "description": "OpenAI SDK v2.48.0 정식 출시."
+  },
+  {
+    "slug": "anthropic-sdk-v0-120-0-release",
+    "title": "Anthropic SDK v0.120.0 릴리즈",
+    "date": "2026-07-24",
+    "category": "AI",
+    "type": "ai-release",
+    "link": "https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.120.0",
+    "description": "Anthropic SDK v0.120.0 정식 출시."
   },
   {
     "slug": "java-27-ga-release",
